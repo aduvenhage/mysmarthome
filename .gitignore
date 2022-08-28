@@ -30,3 +30,6 @@
 *.exe
 *.out
 *.app
+
+# OSX crud
+.DS_Store
