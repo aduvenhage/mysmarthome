@@ -1,13 +1,20 @@
 
+// LoRa sensor on 32u4 (adafruit feather, 868Mhz)
+
 const int RFM95_CS = 8;
 const int RFM95_RST = 4;
 const int RFM95_INT = 7;
 const float RF95_FREQ = 868.0;
 const int INPUT_PIN = 6;
 const int LED_PIN = 13;
-bool radioInit = false;
+const int MSG_TIMEOUT_MS = 4000; 
+const int VBATPIN = A9;
+const float BTY_LOW_V = 3.6;
 
 #include <mysmarthome.h>
+
+
+bool radioInit = false;
 
 
 bool isSensorOpen()
@@ -15,12 +22,18 @@ bool isSensorOpen()
   return !digitalRead(INPUT_PIN);
 }
 
-void sendSensorMsg(bool _open)
+float getBatteryVoltage()
+{
+  // NOTE: multiplying by 2 since hardware has a devider on the pin
+  return analogRead(VBATPIN) * 2.0 * 3.3 / 1024.0;
+}
+
+void sendSensorMsg(bool _open, bool _btyLow)
 {
   Message msg;
-  msg.application = EApplication::LoraBase;
   msg.address = 1;
-  msg.state = _open ? SENSOR_STATE_OPEN : 0;
+  msg.state = _open ? MSG_STATE::SENSOR_XS::OPEN : 0;
+  msg.state |= _btyLow ? MSG_STATE::SENSOR_XS::BTYLOW : 0;
 
   sendRadioMsg(msg);
 }
@@ -48,8 +61,10 @@ void setup()
 void loop()
 {
   static bool sensorOpen = false;
+  static bool btyLow = false;
   static unsigned long timeMsg = 0;
   unsigned long timeNow = millis();
+  unsigned long msgTimeout = MSG_TIMEOUT_MS;
 
   if (!radioInit)
   {
@@ -58,12 +73,17 @@ void loop()
   }
   else
   {
-    if ((timeNow - timeMsg > 2000) || (isSensorOpen() != sensorOpen))
+    if ((timeNow - timeMsg > MSG_TIMEOUT_MS) || (isSensorOpen() != sensorOpen))
     {
       timeMsg = timeNow;
+      msgTimeout = MSG_TIMEOUT_MS + randomByte()*4;
+      
       sensorOpen = isSensorOpen();
-      sendSensorMsg(sensorOpen);
-      Serial.println(sensorOpen ? "Radio message: open" : "Radio message: closed");
+      btyLow = getBatteryVoltage() < BTY_LOW_V;
+      sendSensorMsg(sensorOpen, btyLow);
+      
+      Serial.print(sensorOpen ? "Radio message: open, " : "Radio message: closed, ");
+      Serial.println(btyLow ? "bty_low=true" : "bty_low=false");
     }
     
     if (sensorOpen)
@@ -75,6 +95,6 @@ void loop()
       blink();
     }
 
-    delay(10);
+    delay(randomByte()/10 + 10);
   }
 }
