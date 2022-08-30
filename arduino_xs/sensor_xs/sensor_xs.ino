@@ -8,9 +8,13 @@ const float RF95_FREQ = 868.0;
 const int INPUT_PIN = 6;
 const int LED_PIN = 13;
 const int MSG_TIMEOUT_MS = 4000; 
-const int VBATPIN = A9;
-const float BTY_LOW_V = 3.6;
+const float REF_V = 3.3;
+const int BTY_PIN = A9;
+const float BTY_VRR = 0.5;
+const float BTY_MIN_V = 3.5;
+const float BTY_MAX_V = 4.2;
 
+#include "config.h"
 #include <mysmarthome.h>
 
 
@@ -22,16 +26,10 @@ bool isSensorOpen()
   return !digitalRead(INPUT_PIN);
 }
 
-float getBatteryVoltage()
-{
-  // NOTE: multiplying by 2 since hardware has a devider on the pin
-  return analogRead(VBATPIN) * 2.0 * 3.3 / 1024.0;
-}
-
 void sendSensorMsg(bool _open, bool _btyLow)
 {
   Message msg;
-  msg.address = 1;
+  msg.address = ADDR;
   msg.state = _open ? MSG_STATE::SENSOR_XS::OPEN : 0;
   msg.state |= _btyLow ? MSG_STATE::SENSOR_XS::BTYLOW : 0;
 
@@ -73,16 +71,18 @@ void loop()
   }
   else
   {
+    btyLow = isBatteryLow();
+    sensorOpen = isSensorOpen();
+
     if ((timeNow - timeMsg > MSG_TIMEOUT_MS) || (isSensorOpen() != sensorOpen))
     {
       timeMsg = timeNow;
       msgTimeout = MSG_TIMEOUT_MS + randomByte()*4;
-      
-      sensorOpen = isSensorOpen();
-      btyLow = getBatteryVoltage() < BTY_LOW_V;
       sendSensorMsg(sensorOpen, btyLow);
       
       Serial.print(sensorOpen ? "Radio message: open, " : "Radio message: closed, ");
+      Serial.print(getBatteryVoltage());
+      Serial.print(", ");
       Serial.println(btyLow ? "bty_low=true" : "bty_low=false");
     }
     

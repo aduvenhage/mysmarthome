@@ -10,10 +10,17 @@ const int MOS_PINS[4] = {5, 6, 9, 3};
 const int MOS_ALARM_PIN = MOS_PINS[0];
 const int EEPROM_RUNCOUNT_ADDR = 0;
 const uint32_t ALARM_TIMEOUT_MS = 5000;
+const float REF_V = 3.3;
+const int BTY_PIN = A9;
+const float BTY_VRR = 0.5;
+const float BTY_LOW_V = 12.1;
+const float BTY_MIN_V = 12;
+const float BTY_MAX_V = 12.2;
+
+#include "config.h"
+#include <mysmarthome.h>
 
 #include <EEPROM.h>
-#include <mysmarthome.h>
-#include "programming.h"
 
 
 bool radioInit = false;
@@ -74,6 +81,7 @@ bool checkBtyLow()
   return false;
 }
 
+// receive and process radio messages
 void recvRadioMessages()
 {
   while (1)
@@ -137,7 +145,6 @@ void loop()
   }
   else
   {  
-    // check alarm state
     recvRadioMessages();
     if (checkAlarm(ALARM_TIMEOUT_MS))
     {

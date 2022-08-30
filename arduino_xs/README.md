@@ -23,3 +23,8 @@ https://learn.adafruit.com/adafruit-feather-32u4-radio-with-lora-radio-module/us
 
 ### LoRa Alarm App (base station)
 Based on https://github.com/Makerfabs/Makerfabs_MaLora/tree/main/06MOS4, with custom firmware
+
+## Premake workspace
+Create a premake workspace that just organises all the files.
+- go to `arduino_xs` directory and run the command `premake5 xcode4`
+- _this project is only tested with xcode_ 

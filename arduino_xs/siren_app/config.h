@@ -8,9 +8,11 @@ struct Sensor
 };
 
 Sensor sensors[] = {
-  {"HEK", 1, 0, 0},
-  {"AFDAK", 2, 0, 0},
-  {"VOOR", 3, 0, 0},
+  {"HEKMOTOR", 'HEKM', 0, 0},
+  {"AFDAK BEAM", 'AFDK', 0, 0},
+  {"VOOR BEAM", 'VOOR', 0, 0},
 };
 
 constexpr int NUM_SENSORS = sizeof(sensors) / sizeof(Sensor); 
+constexpr uint32_t PROTO_ID = 'MSHM';
+constexpr uint32_t ADDR = 'SIRN';

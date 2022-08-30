@@ -1,16 +1,4 @@
 
-struct Sensor
-{
-  const char *name;
-  uint32_t address;
-  uint32_t timestamp;
-  uint8_t state;
-};
-
-Sensor sensors[] = {
-  {"HEK", 1, 0, 0},
-  {"AFDAK", 2, 0, 0},
-  {"VOOR", 3, 0, 0},
-};
-
-constexpr int NUM_SENSORS = sizeof(sensors) / sizeof(Sensor); 
+constexpr uint32_t PROTO_ID = 'MSHM';
+constexpr uint32_t ADDR = 'HEKM';
+constexpr float BTY_LOW_V = 3.6;

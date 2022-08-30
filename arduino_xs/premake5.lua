@@ -1,14 +1,14 @@
 -- premake5.lua
 workspace "MySmartHome"
-   location "build"
+   location "workspace"
    configurations { "Debug", "Release" }
 
 project "MySmartHome"
-   location "build/MySmartHome"
+   location "workspace"
    kind "ConsoleApp"
    language "C++"
    cppdialect "C++17"
-   targetdir "bin/%{cfg.buildcfg}"
+   targetdir "workspace/%{cfg.buildcfg}"
    
    sysincludedirs {""}
    includedirs {""}
@@ -21,8 +21,9 @@ project "MySmartHome"
       "sensor_xs/**.h",
       "sensor_xs/**.ino",
       "siren_app/**.h",
-      "sizren_app/**.ino",
+      "siren_app/**.ino",
       "*.lua",
-      "README.md"}
+      "README.md",
+      "../.gitignore"}
       
    removefiles {""}
