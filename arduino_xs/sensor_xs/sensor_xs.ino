@@ -10,7 +10,9 @@ const int LED_PIN = 13;
 const int MSG_TIMEOUT_MS = 4000; 
 const float REF_V = 3.3;
 const int BTY_PIN = A9;
+const int CHG_PIN = A0;
 const float BTY_VRR = 0.5;
+const float CHG_VRR = 0.5;
 const float BTY_MIN_V = 3.5;
 const float BTY_MAX_V = 4.2;
 
@@ -72,12 +74,13 @@ void loop()
   else
   {
     btyLow = isBatteryLow();
-    sensorOpen = isSensorOpen();
 
     if ((timeNow - timeMsg > MSG_TIMEOUT_MS) || (isSensorOpen() != sensorOpen))
     {
       timeMsg = timeNow;
       msgTimeout = MSG_TIMEOUT_MS + randomByte()*4;
+      sensorOpen = isSensorOpen();
+
       sendSensorMsg(sensorOpen, btyLow);
       
       Serial.print(sensorOpen ? "Radio message: open, " : "Radio message: closed, ");

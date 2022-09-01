@@ -8,9 +8,11 @@ const float RF95_FREQ = 868.0;
 const int LED_PIN = 13;
 const float REF_V = 3.3;
 const int BTY_PIN = A9;
+const int CHG_PIN = A0;
 const float BTY_VRR = 0.5;
+const float CHG_VRR = 0.5;
 const float BTY_MIN_V = 3.5;
-const float BTY_MAX_V = 4.2;
+const float BTY_MAX_V = 4.18;
 const int SCREEN_WIDTH = 128; // OLED display width, in pixels
 const int SCREEN_HEIGHT = 64; // OLED display height, in pixels
 const int OLED_MOSI = 5;
@@ -31,7 +33,10 @@ const int OLED_RESET = 6;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 bool radioInit = false;
 bool oledInit = false;
-Message lastSensorMsg = {};
+uint8_t dspIndex = 0;
+unsigned long dspTimestamp = 0;
+String dspMsg;
+String lastMsg;
 
 
 bool setupDisplay()
@@ -45,63 +50,45 @@ bool setupDisplay()
   return true;
 }
 
-// update correct alarm state
-void updateSensorState(uint32_t _src, uint8_t _state)
+char getMsgCountSymbol(int msgCount)
 {
-  unsigned long timestamp = millis();
+  const char symbols[] = {'|', '/', '-', '\\'};
+  return symbols[msgCount % sizeof(symbols)];
+}
+
+// find sensor state
+Sensor &getSensorState(uint32_t _src)
+{
+  static Sensor empty = {nullptr, 0, 0, 0};
   for (int i = 0; i < NUM_SENSORS; i++)
   {
     Sensor &sensor = sensors[i];
     if (sensor.address == _src)
     {
-      if (sensor.state & MSG_STATE::SENSOR_XS::OPEN != _state & MSG_STATE::SENSOR_XS::OPEN)
-      {
-        sensor.timestamp = timestamp;
-      }
-
-      sensor.state = _state;
-      break;
-    }
-  }
-}
-
-const char *getSensorName(uint32_t _src)
-{
-  for (int i = 0; i < NUM_SENSORS; i++)
-  {
-    Sensor &sensor = sensors[i];
-    if (sensor.address == _src)
-    {
-      return sensor.name;
+      return sensor;
     }
   }
 
-  return "";
+  return empty;
 }
 
-String getSensorState(uint32_t _src)
+String getSensorString(const Sensor &_sensor)
 {
   String str;
-  for (int i = 0; i < NUM_SENSORS; i++)
-  {
-    Sensor &sensor = sensors[i];
-    if (sensor.address == _src)
-    {
-      str = sensor.name;
-      str += ", ";
+  str = _sensor.name;
+  str += ", ";
 
-      if (sensor.state & MSG_STATE::SENSOR_XS::OPEN) str += "OPEN";
-      else if (sensor.state & MSG_STATE::SENSOR_XS::BTYLOW) str += "BTY LOW";
-      else str += "CLOSED";
-    }
-  }
+  if (_sensor.state & MSG_STATE::SENSOR_XS::OPEN) str += "OPEN";
+  else if (_sensor.state & MSG_STATE::SENSOR_XS::BTYLOW) str += "BTY LOW";
+  else str += "CLOSED";
 
   return str;
 }
 
 // receive and process radio messages
-void recvRadioMessages()
+unsigned long recvRadioMessages()
 {
+  static unsigned long msgCount = 0;
   while (1)
   {
     // try to read next message
@@ -118,9 +105,27 @@ void recvRadioMessages()
 
       if (msg.application == (uint8_t)MSG_APPLICATION::SENSOR_XS)
       {
-        updateSensorState(msg.address, msg.state);
-        lastSensorMsg = msg;
+        Sensor &sensor = getSensorState(msg.address);
+        if (sensor.name)
+        {
+          unsigned long timestamp = millis();
+          if (sensor.state & MSG_STATE::SENSOR_XS::OPEN != msg.state & MSG_STATE::SENSOR_XS::OPEN)
+          {
+            sensor.timestamp = timestamp;
+            dspTimestamp = timestamp;
+
+            if (msg.state & MSG_STATE::SENSOR_XS::OPEN)
+            {
+              dspMsg = sensor.name;
+            }
+          }
+      
+          sensor.state = msg.state;
+          lastMsg = getSensorString(sensor);
+        }
       }
+
+      msgCount++;
     }
     else
     {
@@ -128,6 +133,8 @@ void recvRadioMessages()
       break;
     }
   }
+
+  return msgCount;
 }
 
 
@@ -149,7 +156,6 @@ void setup()
   display.clearDisplay();
   display.display();
   display.dim(true);
-
   
   // setup and test LoRa
   radioInit = setupRadio();
@@ -162,6 +168,7 @@ void setup()
 void loop()
 {
   static bool btyLow = false;
+  static String dspMsg;
 
   if (!radioInit || !oledInit)
   {
@@ -171,25 +178,51 @@ void loop()
   else
   {
     // receive messages
-    recvRadioMessages();
+    unsigned long msgCount = recvRadioMessages();
+    unsigned long timestamp = millis();
 
-    // update display
+    // prepare display display
     display.clearDisplay();
-
     display.cp437(true);
     display.setCursor(0, 0);
 
+    // draw display/battery state
     display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);    
-    DP("bty: ")DP((int)getBatteryPercentage())DP("% (")DP(getBatteryVoltage())DE("v)")DE("")DE("");
-    
+    display.setTextColor(SSD1306_WHITE);
+    if (isBatteryCharging())
+    {
+      DP("bty* ")DP((int)getBatteryPercentage())DP("%")DE("")DE("");
+    }
+    else
+    {
+      DP("bty ")DP((int)getBatteryPercentage())DP("%")DE("")DE("");
+    }
+
+    // draw current open sensor states 
     display.setTextSize(2);
-    display.setTextColor(SSD1306_WHITE);    
-    DE("HEK MOTOR");
+    display.setTextColor(SSD1306_WHITE);
 
+    if (timestamp - dspTimestamp > 1000)
+    {
+      dspMsg = "";
+      for (int i = 0; i < NUM_SENSORS; i++)
+      {
+        dspIndex++;
+        const Sensor &sensor = sensors[dspIndex % NUM_SENSORS];
+        if (sensor.state & MSG_STATE::SENSOR_XS::OPEN)
+        {
+          dspTimestamp = timestamp;
+          dspMsg = sensor.name;
+          break;
+        }
+      }
+    }
+       
+    DE(dspMsg.c_str());
+
+    // draw last received message string
     display.setTextSize(1);
-    DE("")DE("")DP(getSensorState(lastSensorMsg.address).c_str())DE("");
-
+    DE("")DE("")DP(getMsgCountSymbol(msgCount))DP(" ")DP(lastMsg.c_str());
     display.display();
 
     // status

@@ -1,4 +1,6 @@
 
+
+// sensor state
 struct Sensor
 {
   const char *name;
@@ -7,11 +9,13 @@ struct Sensor
   uint8_t state;
 };
 
+
 Sensor sensors[] = {
   {"HEKMOTOR", 'HEKM', 0, 0},
   {"AFDAK BEAM", 'AFDK', 0, 0},
   {"VOOR BEAM", 'VOOR', 0, 0},
 };
+
 
 constexpr int NUM_SENSORS = sizeof(sensors) / sizeof(Sensor); 
 constexpr uint32_t PROTO_ID = 'MSHM';
