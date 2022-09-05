@@ -10,18 +10,9 @@ float getBatteryVoltage()
 float getBatteryPercentage()
 {
   float p = (getBatteryVoltage() - BTY_MIN_V) / (BTY_MAX_V - BTY_MIN_V) * 100;
-  if (p > 100.0)
-  {
-    return 100.0;
-  }
-  else if (p < 1.0)
-  {
-    return return 1.0;
-  }
-  else
-  {
-    return 0.0;
-  }
+  if (p > 100.0) return 100.0;
+  else if (p < 1.0) return 1.0;
+  return p;
 }
 
 bool isBatteryLow()

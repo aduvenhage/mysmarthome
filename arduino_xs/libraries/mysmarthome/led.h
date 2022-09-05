@@ -23,15 +23,25 @@ void switchLed(uint32_t period, uint8_t dutyCycle)
 
 void blink()
 {
-  switchLed(1000, 128);
+  switchLed(2000, 128);
 }
 
 void flash()
 {
-  switchLed(500, 192);
+  switchLed(500, 64);
 }
 
 void flashFast()
 {
-  switchLed(200, 224);
+  switchLed(100, 64);
+}
+
+void blinkAndFlash()
+{
+  (millis() / 3000) % 2 ? blink() : flash();
+}
+
+void blinkAndFlashFast()
+{
+  (millis() / 3000) % 2 ? blink() : flashFast();
 }

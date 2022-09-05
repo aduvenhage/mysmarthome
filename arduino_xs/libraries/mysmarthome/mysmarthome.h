@@ -5,14 +5,14 @@
 #include "random.h"
 
 
-enum class MSG_APPLICATION : uint8_t
+enum class APPLICATION : uint8_t
 {
   SENSOR_XS = 0,
   SIREN,
   CONTROL
 };
 
-namespace MSG_STATE
+namespace STATE
 {
   namespace SENSOR_XS
   {
@@ -24,17 +24,15 @@ namespace MSG_STATE
   namespace SIREN
   {
     const uint8_t ON = 1;
-    const uint8_t LOUD = 2;
-    const uint8_t BTYLOW = 4;
-    const uint8_t CHARGING = 8;
+    const uint8_t BTYLOW = 2;
+    const uint8_t CHARGING = 4;
   };
 
   namespace CONTROL
   {
     const uint8_t MUTE = 1;
-    const uint8_t LOUD = 2;
-    const uint8_t BTYLOW = 4;
-    const uint8_t CHARGING = 8;
+    const uint8_t BTYLOW = 2;
+    const uint8_t CHARGING = 4;
   };
 };
 
@@ -51,4 +49,22 @@ struct Message
   uint8_t crc = 0;
 };
 #pragma pack(pop)
+
+
+template <int ID>
+struct Timer {
+  static void start(unsigned long _timeout)
+  {
+    timeout = _timeout;
+    timestamp = millis();
+  }
+
+  static bool hasExpired()
+  {
+    return (millis() - timestamp) > timeout;
+  }
+  
+  inline static unsigned long timeout = 0;
+  inline static unsigned long timestamp = 0;
+};
 

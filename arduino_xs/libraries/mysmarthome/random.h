@@ -3,16 +3,13 @@
 // try too find a good random seed value
 int getRandSeed()
 {
-  for (int i = 0; i < 16; i++)
+  uint8_t seed = 0;
+  for (int i = 0; i < 12; i++)
   {
-    int seed = analogRead(0) + analogRead(1) + analogRead(2);
-    if (seed > 0)
-    {
-        return seed;
-    }
+    seed ^= (uint8_t)analogRead(i % 3);
   }
   
-  return 0;
+  return seed;
 }
 
 // returns a random uint8

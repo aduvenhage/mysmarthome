@@ -20,84 +20,74 @@ const float BTY_MAX_V = 4.2;
 #include <mysmarthome.h>
 
 
-bool radioInit = false;
-
-
 bool isSensorOpen()
 {
   return !digitalRead(INPUT_PIN);
 }
 
-void sendSensorMsg(bool _open, bool _btyLow)
+void sendSensorMsg(bool _open, bool _btyLow, bool _charging)
 {
   Message msg;
   msg.address = ADDR;
-  msg.state = _open ? MSG_STATE::SENSOR_XS::OPEN : 0;
-  msg.state |= _btyLow ? MSG_STATE::SENSOR_XS::BTYLOW : 0;
+  msg.state = _open ? STATE::SENSOR_XS::OPEN : 0;
+  msg.state |= _btyLow ? STATE::SENSOR_XS::BTYLOW : 0;
+  msg.state |= _charging ? STATE::SENSOR_XS::CHARGING : 0;
 
   sendRadioMsg(msg);
 }
 
 void setup() 
 {
-  // setup inputs
+  // setup PINS
   pinMode(INPUT_PIN, INPUT_PULLUP);
-
-  // setup LEDS
   pinMode(LED_PIN, OUTPUT);
   
   // setup serial
   Serial.begin(9600);
-  int wait = 0;
-  while (!Serial && wait++ < 10)
-  {
-    delay(200);
-  }
 
-  // setup and test LoRa
-  radioInit = setupRadio();
+  // setup LoRa
+  setupRadio();
 }
 
 void loop()
 {
   static bool sensorOpen = false;
   static bool btyLow = false;
-  static unsigned long timeMsg = 0;
-  unsigned long timeNow = millis();
-  unsigned long msgTimeout = MSG_TIMEOUT_MS;
+  static bool charging = false;
 
-  if (!radioInit)
+  if (!isRadioInitialized())
   {
     flashFast();
-    delay(10);
   }
   else
   {
     btyLow = isBatteryLow();
-
-    if ((timeNow - timeMsg > MSG_TIMEOUT_MS) || (isSensorOpen() != sensorOpen))
+    charging = isBatteryCharging();
+    
+    if (Timer<0>::hasExpired() || (isSensorOpen() != sensorOpen))
     {
-      timeMsg = timeNow;
-      msgTimeout = MSG_TIMEOUT_MS + randomByte()*4;
+      Timer<0>::start(MSG_TIMEOUT_MS + randomByte()*4);
       sensorOpen = isSensorOpen();
 
-      sendSensorMsg(sensorOpen, btyLow);
+      sendSensorMsg(sensorOpen, btyLow, charging);
       
-      Serial.print(sensorOpen ? "Radio message: open, " : "Radio message: closed, ");
+      Serial.print(sensorOpen ? "tx: open, " : "tx: closed, ");
       Serial.print(getBatteryVoltage());
       Serial.print(", ");
-      Serial.println(btyLow ? "bty_low=true" : "bty_low=false");
+      Serial.print(btyLow ? "bty_low=true" : "bty_low=false");
+      Serial.print(", ");
+      Serial.println(charging ? "charging=true" : "charging=false");
     }
     
     if (sensorOpen)
     {
-      digitalWrite(LED_PIN, HIGH);
+      flash();
     }
     else
     {
       blink();
     }
-
-    delay(randomByte()/10 + 10);
   }
+  
+  delay(randomByte()/50);
 }

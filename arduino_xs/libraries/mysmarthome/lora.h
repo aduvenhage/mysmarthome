@@ -3,7 +3,13 @@
 #include <CRC8.h>
 
 RH_RF95 radio(RFM95_CS, RFM95_INT);
+bool radioInit = false;
 CRC8 crc;
+
+bool isRadioInitialized()
+{
+  return radioInit;
+}
 
 // configure and test LoRa radio
 bool setupRadio()
@@ -33,6 +39,7 @@ bool setupRadio()
   radio.setFrequency(RF95_FREQ);
   radio.setTxPower(23, false);
 
+  radioInit = true;
   return true;
 }
 
