@@ -3,37 +3,38 @@
 #include "lora.h"
 #include "led.h"
 #include "random.h"
+#include "ssprintf.h"
 
 
 enum class APPLICATION : uint8_t
 {
-  SENSOR_XS = 0,
-  SIREN,
+  NODE = 0,
   CONTROL
 };
 
+
 namespace STATE
 {
-  namespace SENSOR_XS
+  enum class NODE : uint8_t
   {
-    const uint8_t OPEN = 1;
-    const uint8_t BTYLOW = 2;
-    const uint8_t CHARGING = 4;
+    CLOSED   = 0b00000000,
+    OPEN     = 0b00000001,
+    BTYLOW   = 0b00000010,
+    CHARGING = 0b00000100,
+    MUTED    = 0b00001000
   };
   
-  namespace SIREN
+  enum class CONTROL : uint8_t
   {
-    const uint8_t ON = 1;
-    const uint8_t BTYLOW = 2;
-    const uint8_t CHARGING = 4;
+    NONE = 0b00000000,
+    MUTE = 0b00000001
   };
-
-  namespace CONTROL
+  
+  template <typename VALUE, typename FLAG>
+  bool hasFlag(VALUE _value, FLAG _flag)
   {
-    const uint8_t MUTE = 1;
-    const uint8_t BTYLOW = 2;
-    const uint8_t CHARGING = 4;
-  };
+    return (uint8_t)_value & (uint8_t)_flag;
+  }
 };
 
 
@@ -43,8 +44,8 @@ namespace STATE
 struct Message
 {
   uint32_t protoId = PROTO_ID;
+  APPLICATION application = APPLICATION::NODE;
   uint32_t address = 0;
-  uint8_t application = 0;
   uint8_t state = 0;
   uint8_t crc = 0;
 };
@@ -61,10 +62,76 @@ struct Timer {
 
   static bool hasExpired()
   {
-    return (millis() - timestamp) > timeout;
+    return (millis() - timestamp) >= timeout;
   }
   
   inline static unsigned long timeout = 0;
   inline static unsigned long timestamp = 0;
+};
+
+
+void sendNodeMsg(bool _open, bool _btyLow, bool _charging, bool _muted)
+{
+  Message msg;
+  msg.address = ADDR;
+  msg.application = APPLICATION::NODE;
+  msg.state = _open ? (uint8_t)STATE::NODE::OPEN : 0;
+  msg.state |= _btyLow ? (uint8_t)STATE::NODE::BTYLOW : 0;
+  msg.state |= _charging ? (uint8_t)STATE::NODE::CHARGING : 0;
+  msg.state |= _muted ? (uint8_t)STATE::NODE::MUTED : 0;
+
+  sendRadioMsg(msg);
+}
+
+
+void sendCmdMsg(bool _mute)
+{
+  Message msg;
+  msg.address = ADDR;
+  msg.application = APPLICATION::CONTROL;
+  msg.state = _mute ? (uint8_t)STATE::CONTROL::MUTE : 0;
+
+  sendRadioMsg(msg);
+}
+
+
+template <>
+struct Format<APPLICATION>
+{
+  static const char *go(const APPLICATION &_arg) {
+    switch (_arg)
+    {
+      case APPLICATION::NODE:
+        return "NODE";
+        
+      case APPLICATION::CONTROL:
+        return "CONTROL";
+        
+      default:
+        return "";
+    }
+  }
+};
+
+
+template <>
+struct Format<STATE::NODE>
+{
+  static const char *go(const STATE::NODE &_arg) {
+    if (STATE::hasFlag(_arg, STATE::NODE::OPEN)) return "OPEN";
+    else if (STATE::hasFlag(_arg, STATE::NODE::BTYLOW)) return "BTYLOW";
+    else if (STATE::hasFlag(_arg, STATE::NODE::MUTED)) return "MUTED";
+    else return "CLOSED";
+  }
+};
+
+
+template <>
+struct Format<STATE::CONTROL>
+{
+  static const char *go(const STATE::CONTROL &_arg) {
+    if (STATE::hasFlag(_arg, STATE::CONTROL::MUTE)) return "MUTE";
+    else return "";
+  }
 };
 

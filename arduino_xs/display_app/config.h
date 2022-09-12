@@ -1,7 +1,5 @@
 
-
-// sensor state
-struct Sensor
+struct Node
 {
   const char *name;
   uint32_t address;
@@ -9,15 +7,14 @@ struct Sensor
   uint8_t state;
 };
 
-
-Sensor sensors[] = {
+Node nodes[] = {
   {"HEKMOTOR", 'HEKM', 0, 0},
   {"AFDAK BEAM", 'AFDK', 0, 0},
   {"VOOR BEAM", 'VOOR', 0, 0},
+  {"SIREN", 'SIRN', 0, 0},
+  {"DISPLAY", 'DISP', 0, 0},
 };
 
-
-constexpr int NUM_SENSORS = sizeof(sensors) / sizeof(Sensor); 
+constexpr uint8_t NUM_NODES = sizeof(nodes) / sizeof(Node); 
 constexpr uint32_t PROTO_ID = 'MSHM';
 constexpr uint32_t ADDR = 'DISP';
-constexpr float BTY_LOW_V = 3.6;

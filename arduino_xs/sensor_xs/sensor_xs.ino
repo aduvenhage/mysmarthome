@@ -1,20 +1,24 @@
 
 // LoRa sensor on 32u4 (adafruit feather, 868Mhz)
 
-const int RFM95_CS = 8;
-const int RFM95_RST = 4;
-const int RFM95_INT = 7;
-const float RF95_FREQ = 868.0;
-const int INPUT_PIN = 6;
-const int LED_PIN = 13;
-const int MSG_TIMEOUT_MS = 4000; 
-const float REF_V = 3.3;
-const int BTY_PIN = A9;
-const int CHG_PIN = A0;
-const float BTY_VRR = 0.5;
-const float CHG_VRR = 0.5;
-const float BTY_MIN_V = 3.5;
-const float BTY_MAX_V = 4.2;
+// framework constans/setup
+constexpr int RFM95_CS = 8;
+constexpr int RFM95_RST = 4;
+constexpr int RFM95_INT = 7;
+constexpr float RF95_FREQ = 868.0;
+constexpr int INPUT_PIN = 6;
+constexpr int LED_PIN = 13;
+constexpr int LED_ON = LOW;
+constexpr float REF_V = 3.3;
+constexpr int BTY_PIN = A9;
+constexpr int CHG_PIN = A0;
+constexpr float BTY_VRR = 0.5;
+constexpr float CHG_VRR = 0.5;
+constexpr float BTY_MIN_V = 3.5;
+constexpr float BTY_LOW_V = 3.6;
+constexpr float BTY_MAX_V = 4.2;
+constexpr unsigned long MSG_TIMEOUT_MS = 4000;
+constexpr int NODE_TIMER = 0;
 
 #include "config.h"
 #include <mysmarthome.h>
@@ -23,17 +27,6 @@ const float BTY_MAX_V = 4.2;
 bool isSensorOpen()
 {
   return !digitalRead(INPUT_PIN);
-}
-
-void sendSensorMsg(bool _open, bool _btyLow, bool _charging)
-{
-  Message msg;
-  msg.address = ADDR;
-  msg.state = _open ? STATE::SENSOR_XS::OPEN : 0;
-  msg.state |= _btyLow ? STATE::SENSOR_XS::BTYLOW : 0;
-  msg.state |= _charging ? STATE::SENSOR_XS::CHARGING : 0;
-
-  sendRadioMsg(msg);
 }
 
 void setup() 
@@ -64,19 +57,13 @@ void loop()
     btyLow = isBatteryLow();
     charging = isBatteryCharging();
     
-    if (Timer<0>::hasExpired() || (isSensorOpen() != sensorOpen))
+    if (Timer<NODE_TIMER>::hasExpired() || (isSensorOpen() != sensorOpen))
     {
-      Timer<0>::start(MSG_TIMEOUT_MS + randomByte()*4);
+      Timer<NODE_TIMER>::start(MSG_TIMEOUT_MS + randomByte()*4);
       sensorOpen = isSensorOpen();
+      sendNodeMsg(sensorOpen, btyLow, charging, false);
 
-      sendSensorMsg(sensorOpen, btyLow, charging);
-      
-      Serial.print(sensorOpen ? "tx: open, " : "tx: closed, ");
-      Serial.print(getBatteryVoltage());
-      Serial.print(", ");
-      Serial.print(btyLow ? "bty_low=true" : "bty_low=false");
-      Serial.print(", ");
-      Serial.println(charging ? "charging=true" : "charging=false");
+      ssprintf(Serial, "tx: open=%s, vbatt=%.2f, bty_low=%s, charging=%s", sensorOpen, getBatteryVoltage(), btyLow, charging);
     }
     
     if (sensorOpen)

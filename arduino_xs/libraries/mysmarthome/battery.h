@@ -1,9 +1,12 @@
 
+constexpr float VPIN_ALPHA = 0.02;
+constexpr float VPIN_BETA = 1 - VPIN_ALPHA;
+
 float getBatteryVoltage()
 {
   // NOTE: multiplying by 2 since hardware has a devider on the pin
   static float vbatt = 0;
-  vbatt = 0.9 * vbatt + 0.1 * analogRead(BTY_PIN) / BTY_VRR * REF_V / 1024.0;
+  vbatt = VPIN_BETA * vbatt + VPIN_ALPHA * analogRead(BTY_PIN) / BTY_VRR * REF_V / 1024.0;
   return vbatt;
 }
 
@@ -24,7 +27,7 @@ float getChargeVoltage()
 {
   // NOTE: multiplying by 2 since hardware has a devider on the pin
   static float vchg = 0;
-  vchg = 0.9 * vchg + 0.1 * analogRead(CHG_PIN) / CHG_VRR * REF_V / 1024.0;
+  vchg = VPIN_BETA * vchg + VPIN_ALPHA * analogRead(CHG_PIN) / CHG_VRR * REF_V / 1024.0;
   return vchg;
 }
 

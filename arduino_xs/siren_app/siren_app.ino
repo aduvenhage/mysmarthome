@@ -1,24 +1,28 @@
 // LoRa siren app Arduino Pro (https://github.com/Makerfabs/Makerfabs_MaLora/tree/main/06MOS4)
 
 
-const int RFM95_CS = 10;
-const int RFM95_RST = 4;
-const int RFM95_INT = 2;
-const float RF95_FREQ = 868.0;
-const int LED_PIN = A3;
-const int MOS_PINS[4] = {5, 6, 9, 3};
-const int MOS_ALARM_PIN = MOS_PINS[0];
-const int EEPROM_RUNCOUNT_ADDR = 0;
-const uint32_t ALARM_TIMEOUT_MS = 10000;
-const float REF_V = 3.3;
-const int BTY_PIN = A1;
-const int CHG_PIN = A0;
-const float BTY_VRR = 0.5;
-const float CHG_VRR = 0.5;
-const float BTY_LOW_V = 12.1;
-const float BTY_MIN_V = 12;
-const float BTY_MAX_V = 12.2;
-const unsigned long MUTE_TIMEOUT = 1000ul*60ul*60ul;
+constexpr int RFM95_CS = 10;
+constexpr int RFM95_RST = 4;
+constexpr int RFM95_INT = 2;
+constexpr float RF95_FREQ = 868.0;
+constexpr int LED_PIN = A3;
+constexpr int LED_ON = HIGH;
+constexpr int MOS_PINS[4] = {5, 6, 9, 3};
+constexpr int MOS_ALARM_PIN = MOS_PINS[0];
+constexpr uint32_t ALARM_TIMEOUT_MS = 10000;
+constexpr float REF_V = 3.3;
+constexpr int BTY_PIN = A1;
+constexpr int CHG_PIN = A0;
+constexpr float BTY_VRR = 0.5;
+constexpr float CHG_VRR = 0.5;
+constexpr float BTY_MIN_V = 12;
+constexpr float BTY_LOW_V = 12.1;
+constexpr float BTY_MAX_V = 12.2;
+constexpr unsigned long MUTE_TIMEOUT = 1000ul*60ul*60ul;
+constexpr unsigned long MSG_TIMEOUT_MS = 4000;
+constexpr int MUTE_TIMER = 0;
+constexpr int NODE_TIMER = 1;
+
 
 #include "config.h"
 #include <mysmarthome.h>
@@ -34,34 +38,28 @@ void recvRadioMessages()
     // try to read next message
     if (Message msg; recvRadioMsg(msg, PROTO_ID) > 0)
     {
-      Serial.print("rx: app=");
-      Serial.print(msg.application);
-      Serial.print(", addr=");
-      Serial.print(msg.address);
-      Serial.print(", state=");
-      Serial.print(msg.state);
-      Serial.print(", crc=");
-      Serial.println(msg.crc);
+      ssprintf(Serial, "rx: app=%d, addr=%lu, state=%d, crc=%d", (int)msg.application, msg.address, (int)msg.state, (int)msg.crc);
 
-      if (msg.application == (uint8_t)APPLICATION::SENSOR_XS)
+      if (msg.application == APPLICATION::NODE)
       {
-        Sensor &sensor = getSensorState(msg.address);
-        if (sensor.name)
+        Node &node = getNodeState(msg.address);
+        if (node.name)
         {
-          if ((sensor.state & STATE::SENSOR_XS::OPEN) != (msg.state & STATE::SENSOR_XS::OPEN))
+          if (STATE::hasFlag(node.state, STATE::NODE::OPEN) != STATE::hasFlag(msg.state, STATE::NODE::OPEN))
           {
-            sensor.timestamp = millis();
+            node.timestamp = millis();
           }
     
-          sensor.state = msg.state;
+          node.state = msg.state;
         }
       }
-      else if (msg.application == (uint8_t)APPLICATION::CONTROL)
+      else if (msg.application == APPLICATION::CONTROL)
       {
-        if (msg.state == STATE::CONTROL::MUTE)
-        {
-          Timer<0>::start(MUTE_TIMEOUT);
-        }
+        // set new mute state
+        Timer<MUTE_TIMER>::start(STATE::hasFlag(msg.state, STATE::CONTROL::MUTE) ? MUTE_TIMEOUT : 0);
+        
+        // force node msg
+        Timer<NODE_TIMER>::start(500);
       }
     }
     else
@@ -77,12 +75,12 @@ void recvRadioMessages()
 bool checkAlarm(unsigned long timeout)
 {
   unsigned long timestamp = millis();
-  for (int i = 0; i < NUM_SENSORS; i++)
+  for (uint8_t i = 0; i < NUM_NODES; i++)
   {
-    Sensor &sensor = sensors[i];
-    if (sensor.state & STATE::SENSOR_XS::OPEN)
+    Node &node = nodes[i];
+    if (STATE::hasFlag(node.state, STATE::NODE::OPEN))
     {
-      if (timestamp - sensor.timestamp < timeout)
+      if (timestamp - node.timestamp < timeout)
       {
         return true;
       }
@@ -93,14 +91,14 @@ bool checkAlarm(unsigned long timeout)
 }
 
 
-// check if any sensor has a low battery state
+// check if any node has a low battery state
 bool checkBtyLow()
 {
   unsigned long timestamp = millis();
-  for (int i = 0; i < NUM_SENSORS; i++)
+  for (uint8_t i = 0; i < NUM_NODES; i++)
   {
-    Sensor &sensor = sensors[i];
-    if (sensor.state & STATE::SENSOR_XS::BTYLOW)
+    Node &node = nodes[i];
+    if (STATE::hasFlag(node.state, STATE::NODE::BTYLOW))
     {
       return true;
     }
@@ -110,16 +108,16 @@ bool checkBtyLow()
 }
 
 
-// find sensor state
-Sensor &getSensorState(uint32_t _src)
+// find node state
+Node &getNodeState(uint32_t _src)
 {
-  static Sensor empty = {nullptr, 0, 0, 0};
-  for (int i = 0; i < NUM_SENSORS; i++)
+  static Node empty = {nullptr, 0, 0, 0};
+  for (uint8_t i = 0; i < NUM_NODES; i++)
   {
-    Sensor &sensor = sensors[i];
-    if (sensor.address == _src)
+    Node &node = nodes[i];
+    if (node.address == _src)
     {
-      return sensor;
+      return node;
     }
   }
 
@@ -141,31 +139,14 @@ void setup()
 
   // setup and test LoRa
   radioInit = setupRadio();
-
-  // increment run count
-  EEPROM.write(EEPROM_RUNCOUNT_ADDR, EEPROM.read(EEPROM_RUNCOUNT_ADDR)+1);
-  Serial.print("Run count = ");
-  Serial.println(EEPROM.read(EEPROM_RUNCOUNT_ADDR));
-  Serial.print("Num sensors = ");
-  Serial.println(NUM_SENSORS);
-
-  // check mute state
-  bool muted = (bool)(EEPROM.read(EEPROM_RUNCOUNT_ADDR) % 2);
-  if (muted)
-  {
-    Timer<0>::start(MUTE_TIMEOUT);
-    Serial.println("muted = true");
-  }
-  else
-  {
-    Serial.println("muted = false");
-  }
 }
+
 
 void loop()
 {
   static bool alarm = false;
   static bool btyLow = false;
+  static bool charging = false;
   static bool muted = false;
   
   if (!radioInit)
@@ -177,10 +158,11 @@ void loop()
     // process radio messages
     recvRadioMessages();
     
-    // check sensor states
+    // check node states
     alarm = checkAlarm(ALARM_TIMEOUT_MS);
     btyLow = checkBtyLow();
-    muted = !Timer<0>::hasExpired();
+    charging = isBatteryCharging();
+    muted = !Timer<MUTE_TIMER>::hasExpired();
 
     if (alarm && !muted)
     {
@@ -189,6 +171,15 @@ void loop()
     else
     {
       analogWrite(MOS_ALARM_PIN, 255);
+    }
+
+    // send out siren node messages
+    if (Timer<NODE_TIMER>::hasExpired())
+    {
+      sendNodeMsg(false, btyLow, charging, muted);
+      Timer<NODE_TIMER>::start(MSG_TIMEOUT_MS + randomByte()*4);
+
+      ssprintf(Serial, "tx: vbatt=%.2f, bty_low=%s, charging=%s, muted=%s", getBatteryVoltage(), btyLow, charging, muted);
     }
 
     // show app status

@@ -1,28 +1,36 @@
 
 // LoRa sensor dsiplay on 32u4 (adafruit feather, 868Mhz), with Adafruit ssd1306_128x64_spi
 
-const int RFM95_CS = 8;
-const int RFM95_RST = 4;
-const int RFM95_INT = 7;
-const float RF95_FREQ = 868.0;
-const int LED_PIN = 13;
-const float REF_V = 3.3;
-const int BTY_PIN = A9;
-const int CHG_PIN = A0;
-const float BTY_VRR = 0.5;
-const float CHG_VRR = 0.5;
-const float BTY_MIN_V = 3.5;
-const float BTY_MAX_V = 4.18;
-const int SCREEN_WIDTH = 128; // OLED display width, in pixels
-const int SCREEN_HEIGHT = 64; // OLED display height, in pixels
-const int OLED_MOSI = 5;
-const int OLED_CLK = 10;
-const int OLED_DC = 11;
-const int OLED_CS = 12;
-const int OLED_RESET = 6;
-const unsigned long DSP_TIMEOUT_MS = 3000;
-const int BUTTON1_PIN = A1;
-const int BUTTON2_PIN = A2;
+constexpr int RFM95_CS = 8;
+constexpr int RFM95_RST = 4;
+constexpr int RFM95_INT = 7;
+constexpr float RF95_FREQ = 868.0;
+constexpr int LED_PIN = 13;
+constexpr int LED_ON = LOW;
+constexpr float REF_V = 3.3;
+constexpr int BTY_PIN = A9;
+constexpr int CHG_PIN = A0;
+constexpr float BTY_VRR = 0.5;
+constexpr float CHG_VRR = 0.5;
+constexpr float BTY_MIN_V = 3.5;
+constexpr float BTY_LOW_V = 3.6;
+constexpr float BTY_MAX_V = 4.18;
+constexpr int SCREEN_WIDTH = 128; // OLED display width, in pixels
+constexpr int SCREEN_HEIGHT = 64; // OLED display height, in pixels
+constexpr int OLED_MOSI = 5;
+constexpr int OLED_CLK = 10;
+constexpr int OLED_DC = 11;
+constexpr int OLED_CS = 12;
+constexpr int OLED_RESET = 6;
+constexpr unsigned long DSP_TIMEOUT_MS = 3000;
+constexpr int BUTTON1_PIN = A1;
+constexpr int BUTTON2_PIN = A2;
+constexpr unsigned long MSG_TIMEOUT_MS = 4000;
+constexpr int DSP_TIMER = 0;
+constexpr int NODE_TIMER = 1;
+constexpr int BT2_TIMER = 2;
+constexpr int SLEEP_TIMER = 3;
+constexpr unsigned long SLEEP_TIMEOUT = 30000;
 
 #include "config.h"
 #include <mysmarthome.h>
@@ -35,9 +43,8 @@ const int BUTTON2_PIN = A2;
 
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 bool oledInit = false;
-uint8_t dspIndex = 0;
-String dspMsg;
-String lastMsg;
+Node *lastMsg = nullptr;
+Node *lastAlarm = nullptr;
 
 
 bool setupDisplay()
@@ -51,7 +58,8 @@ bool setupDisplay()
   return true;
 }
 
-char getMsgCountSymbol(int msgCount)
+
+char getMsgCountSymbol(uint8_t msgCount)
 {
   static const char symbols[] = {'|', '/', '-', '\\'};
   return symbols[msgCount % sizeof(symbols)];
@@ -62,12 +70,12 @@ char getMsgCountSymbol(int msgCount)
 bool checkAlarm(unsigned long timeout)
 {
   unsigned long timestamp = millis();
-  for (int i = 0; i < NUM_SENSORS; i++)
+  for (uint8_t i = 0; i < NUM_NODES; i++)
   {
-    Sensor &sensor = sensors[i];
-    if (sensor.state & STATE::SENSOR_XS::OPEN)
+    Node &node = nodes[i];
+    if (STATE::hasFlag(node.state, STATE::NODE::OPEN))
     {
-      if (timestamp - sensor.timestamp < timeout)
+      if (timestamp - node.timestamp < timeout)
       {
         return true;
       }
@@ -78,28 +86,14 @@ bool checkAlarm(unsigned long timeout)
 }
 
 
-String getSensorString(const Sensor &_sensor)
-{
-  String str;
-  str = _sensor.name;
-  str += " - ";
-
-  if (_sensor.state & STATE::SENSOR_XS::OPEN) str += "OPEN";
-  else if (_sensor.state & STATE::SENSOR_XS::BTYLOW) str += "BTY LOW";
-  else str += "CLOSED";
-
-  return str;
-}
-
-
 // check if any sensor has a low battery state
 bool checkBtyLow()
 {
   unsigned long timestamp = millis();
-  for (int i = 0; i < NUM_SENSORS; i++)
+  for (uint8_t i = 0; i < NUM_NODES; i++)
   {
-    Sensor &sensor = sensors[i];
-    if (sensor.state & STATE::SENSOR_XS::BTYLOW)
+    Node &node = nodes[i];
+    if (STATE::hasFlag(node.state, STATE::NODE::BTYLOW))
     {
       return true;
     }
@@ -110,58 +104,50 @@ bool checkBtyLow()
 
 
 // find sensor state
-Sensor &getSensorState(uint32_t _src)
+Node *getNode(uint32_t _src)
 {
-  static Sensor empty = {nullptr, 0, 0, 0};
-  for (int i = 0; i < NUM_SENSORS; i++)
+  for (uint8_t i = 0; i < NUM_NODES; i++)
   {
-    Sensor &sensor = sensors[i];
-    if (sensor.address == _src)
+    Node &node = nodes[i];
+    if (node.address == _src)
     {
-      return sensor;
+      return &node;
     }
   }
 
-  return empty;
+  return nullptr;
 }
 
 
 // receive and process radio messages
-unsigned long recvRadioMessages()
+uint8_t recvRadioMessages()
 {
-  static unsigned long msgCount = 0;
+  static uint8_t msgCount = 0;
   while (1)
   {
     // try to read next message
     if (Message msg; recvRadioMsg(msg, PROTO_ID) > 0)
     {
-      Serial.print("rx: app=");
-      Serial.print(msg.application);
-      Serial.print(", addr=");
-      Serial.print(msg.address);
-      Serial.print(", state=");
-      Serial.print(msg.state);
-      Serial.print(", crc=");
-      Serial.println(msg.crc);
+      ssprintf(Serial, "rx: %s, addr=%lu, state=%d, crc=%d\n", msg.application, msg.address, (int)msg.state, (int)msg.crc);
 
-      if (msg.application == (uint8_t)APPLICATION::SENSOR_XS)
+      if (msg.application == APPLICATION::NODE)
       {
-        Sensor &sensor = getSensorState(msg.address);
-        if (sensor.name)
+        Node *node = getNode(msg.address);
+        if (node)
         {
-          if ((sensor.state & STATE::SENSOR_XS::OPEN) != (msg.state & STATE::SENSOR_XS::OPEN))
+          if (STATE::hasFlag(node->state, STATE::NODE::OPEN) != STATE::hasFlag(msg.state, STATE::NODE::OPEN))
           {
-            sensor.timestamp = millis();
-            Timer<0>::start(DSP_TIMEOUT_MS);
+            node->timestamp = millis();
+            Timer<DSP_TIMER>::start(DSP_TIMEOUT_MS);
 
-            if (msg.state & STATE::SENSOR_XS::OPEN)
+            if (STATE::hasFlag(msg.state, STATE::NODE::OPEN))
             {
-              dspMsg = sensor.name;
+              lastAlarm = node;
             }
           }
       
-          sensor.state = msg.state;
-          lastMsg = getSensorString(sensor);
+          node->state = msg.state;
+          lastMsg = node;
         }
       }
 
@@ -178,53 +164,50 @@ unsigned long recvRadioMessages()
 }
 
 
-#define DP(s) display.print(s);
-#define DE(s) display.println(s);
-
 void drawMain(unsigned long msgCount)
 {
-  static String dspMsg;
+  static uint8_t dspIndex = 0;
 
   // draw display/battery state
   display.setTextSize(1);
   display.setTextColor(WHITE);
-  if (isBatteryCharging())
-  {
-    DP("bty* ")DP((int)getBatteryPercentage())DP("%")DE("")DE("");
-  }
-  else
-  {
-    DP("bty ")DP((int)getBatteryPercentage())DP("%")DE("")DE("");
-  }
+  ssprintf(display, "bty%s %d\n\n", isBatteryCharging() ? "*" : "", (int)getBatteryPercentage());
 
   // draw current open sensor states 
   display.setTextSize(2);
   display.setTextColor(WHITE);
 
-  if (!Timer<0>::hasExpired())
+  if (!Timer<DSP_TIMER>::hasExpired())
   {
-    dspMsg = "";
-    for (int i = 0; i < NUM_SENSORS; i++)
+    lastAlarm = nullptr;
+    for (uint8_t i = 0; i < NUM_NODES; i++)
     {
       dspIndex++;
-      const Sensor &sensor = sensors[dspIndex % NUM_SENSORS];
-      if (sensor.name)
+      const Node &node = nodes[dspIndex % NUM_NODES];
+      if (STATE::hasFlag(node.state, STATE::NODE::OPEN))
       {
-        if (sensor.state & STATE::SENSOR_XS::OPEN)
-        {
-          Timer<0>::start(DSP_TIMEOUT_MS);
-          dspMsg = sensor.name;
-          break;
-        }
+        Timer<DSP_TIMER>::start(DSP_TIMEOUT_MS);        
+        lastAlarm = &node;
+        break;
       }
     }
   }
-     
-  DE(dspMsg.c_str());
 
+  if (lastAlarm)
+  {
+    ssprintf(display, "%s - %s\n\n", lastAlarm->name, (STATE::NODE)lastAlarm->state);
+  }
+  else
+  {
+    ssprintf(display, "\n\n");
+  }
+  
   // draw last received message string
-  display.setTextSize(1);
-  DE("")DE("")DP(getMsgCountSymbol(msgCount))DP(" ")DP(lastMsg.c_str());
+  if (lastMsg)
+  {
+    display.setTextSize(1);
+    ssprintf(display, "%c %s - %s\n", getMsgCountSymbol(msgCount), lastMsg->name, (STATE::NODE)lastMsg->state);
+  }
 }
 
 
@@ -234,11 +217,29 @@ void drawList()
   display.setTextColor(BLACK, WHITE);
   display.fillScreen(WHITE);
   
-  for (int i = 0; i < NUM_SENSORS; i++)
+  for (uint8_t i = 0; i < NUM_NODES; i++)
   {
-    String str = getSensorString(sensors[i]);
-    DE(str);
+    Node &node = nodes[i];
+    ssprintf(display, "%s - %s\n", node.name, (STATE::NODE)node.state);
   }
+}
+
+
+bool isButtonPressed(int pin)
+{
+  return !digitalRead(pin);
+}
+
+
+bool isSleeping()
+{
+  return Timer<SLEEP_TIMER>::hasExpired();
+}
+
+
+void wakeUp()
+{
+  Timer<SLEEP_TIMER>::start(SLEEP_TIMEOUT);
 }
 
 
@@ -259,6 +260,7 @@ void setup()
   
   // setup and test LoRa
   setupRadio();
+  wakeUp();
 }
 
 
@@ -266,6 +268,8 @@ void loop()
 {
   static bool alarm = false;
   static bool btyLow = false;
+  static bool charging = false;
+  static bool muted = false;
 
   if (!isRadioInitialized() || !oledInit)
   {
@@ -274,18 +278,23 @@ void loop()
   else
   {
     // receive messages
-    unsigned long msgCount = recvRadioMessages();
+    uint8_t msgCount = recvRadioMessages();
 
     // check sensor states
     alarm = checkAlarm(DSP_TIMEOUT_MS);
     btyLow = checkBtyLow();
+    charging = isBatteryCharging();
 
     // prepare display display
     display.clearDisplay();
     display.cp437(true);
     display.setCursor(0, 0);
 
-    if (!digitalRead(BUTTON1_PIN))
+    if (isSleeping())
+    {
+      
+    }
+    else if (isButtonPressed(BUTTON1_PIN))
     {
       drawList();
     }
@@ -296,6 +305,33 @@ void loop()
 
     display.dim(true);
     display.display();
+
+    // send out display node messages
+    if (!isSleeping() && isButtonPressed(BUTTON2_PIN))
+    {
+      if (Timer<BT2_TIMER>::hasExpired())
+      {
+        muted = !muted;
+        sendCmdMsg(muted);
+        Timer<BT2_TIMER>::start(1000);
+
+        ssprintf(Serial, "tx: muted=%s", muted);
+      }
+    }
+    
+    if (Timer<NODE_TIMER>::hasExpired())
+    {
+      sendNodeMsg(false, btyLow, charging, false);
+      Timer<NODE_TIMER>::start(MSG_TIMEOUT_MS + randomByte()*4);
+      
+      ssprintf(Serial, "tx: vbatt=%.2f, bty_low=%s, charging=%s\n", getBatteryVoltage(), btyLow, charging);
+    }
+
+    // check for sleep
+    if (isButtonPressed(BUTTON2_PIN) || isButtonPressed(BUTTON1_PIN) || alarm)
+    {
+      wakeUp();
+    }
 
     // status
     if (alarm)
@@ -311,6 +347,6 @@ void loop()
       blink();
     }
   }
-  
+
   delay(randomByte()/50);
 }
