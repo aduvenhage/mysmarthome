@@ -6,7 +6,7 @@ constexpr int RFM95_RST = 4;
 constexpr int RFM95_INT = 2;
 constexpr float RF95_FREQ = 868.0;
 constexpr int LED_PIN = A3;
-constexpr int LED_ON = HIGH;
+constexpr int LED_ON = LOW;
 constexpr int MOS_PINS[4] = {5, 6, 9, 3};
 constexpr int MOS_ALARM_PIN = MOS_PINS[0];
 constexpr uint32_t ALARM_TIMEOUT_MS = 10000;
@@ -19,9 +19,10 @@ constexpr float BTY_MIN_V = 12;
 constexpr float BTY_LOW_V = 12.1;
 constexpr float BTY_MAX_V = 12.2;
 constexpr unsigned long MUTE_TIMEOUT = 1000ul*60ul*60ul;
-constexpr unsigned long MSG_TIMEOUT_MS = 4000;
+constexpr unsigned long MSG_TIMEOUT = 4000;
 constexpr int MUTE_TIMER = 0;
 constexpr int NODE_TIMER = 1;
+constexpr int SIREN_TIMER = 2;
 
 
 #include "config.h"
@@ -29,82 +30,31 @@ constexpr int NODE_TIMER = 1;
 
 #include <EEPROM.h>
 
-
-// receive and process radio messages
-void recvRadioMessages()
+// returns true if siren should be on
+bool isSirenOn()
 {
-  while (1)
-  {
-    // try to read next message
-    if (Message msg; recvRadioMsg(msg, PROTO_ID) > 0)
-    {
-      ssprintf(Serial, "rx: app=%d, addr=%lu, state=%d, crc=%d", (int)msg.application, msg.address, (int)msg.state, (int)msg.crc);
-
-      if (msg.application == APPLICATION::NODE)
-      {
-        Node &node = getNodeState(msg.address);
-        if (node.name)
-        {
-          if (STATE::hasFlag(node.state, STATE::NODE::OPEN) != STATE::hasFlag(msg.state, STATE::NODE::OPEN))
-          {
-            node.timestamp = millis();
-          }
-    
-          node.state = msg.state;
-        }
-      }
-      else if (msg.application == APPLICATION::CONTROL)
-      {
-        // set new mute state
-        Timer<MUTE_TIMER>::start(STATE::hasFlag(msg.state, STATE::CONTROL::MUTE) ? MUTE_TIMEOUT : 0);
-        
-        // force node msg
-        Timer<NODE_TIMER>::start(500);
-      }
-    }
-    else
-    {
-      // no more message
-      break;
-    }
-  }
+  return !Timer<SIREN_TIMER>::hasExpired();
 }
 
 
-// check if alarm should be on
-bool checkAlarm(unsigned long timeout)
+// start siren timer
+void startSiren(unsigned long timeout)
 {
-  unsigned long timestamp = millis();
-  for (uint8_t i = 0; i < NUM_NODES; i++)
-  {
-    Node &node = nodes[i];
-    if (STATE::hasFlag(node.state, STATE::NODE::OPEN))
-    {
-      if (timestamp - node.timestamp < timeout)
-      {
-        return true;
-      }
-    }
-  }
-
-  return false;
+  Timer<SIREN_TIMER>::start(timeout);
 }
 
 
-// check if any node has a low battery state
-bool checkBtyLow()
+// returns true if siren is muted
+bool isMuted()
 {
-  unsigned long timestamp = millis();
-  for (uint8_t i = 0; i < NUM_NODES; i++)
-  {
-    Node &node = nodes[i];
-    if (STATE::hasFlag(node.state, STATE::NODE::BTYLOW))
-    {
-      return true;
-    }
-  }
+  return !Timer<MUTE_TIMER>::hasExpired();
+}
 
-  return false;
+
+// start mute timer
+void startMute(unsigned long timeout)
+{
+  Timer<MUTE_TIMER>::start(timeout);
 }
 
 
@@ -125,6 +75,66 @@ Node &getNodeState(uint32_t _src)
 }
 
 
+// receive and process radio messages
+void recvRadioMessages()
+{
+  while (1)
+  {
+    // try to read next message
+    if (Message msg; recvRadioMsg(msg, PROTO_ID) > 0)
+    {
+      ssprintf(Serial, "rx: app=%d, addr=%lu, state=%d, crc=%d\n", (int)msg.application, msg.address, (int)msg.state, (int)msg.crc);
+
+      if (msg.application == APPLICATION::NODE)
+      {
+        Node &node = getNodeState(msg.address);
+        if (node.name)
+        {
+          // start siren if new node state is open
+          if (!STATE::hasFlag(node.state, STATE::NODE::OPEN) && STATE::hasFlag(msg.state, STATE::NODE::OPEN))
+          {
+            startSiren(ALARM_TIMEOUT_MS);
+          }
+
+          // update node state
+          node.state = msg.state;
+          node.timestamp = millis();
+        }
+      }
+      else if (msg.application == APPLICATION::CONTROL)
+      {
+        // set new mute state
+        startMute(STATE::hasFlag(msg.state, STATE::CONTROL::MUTE) ? MUTE_TIMEOUT : 0);
+        
+        // force node msg
+        Timer<NODE_TIMER>::start(500ul + randomByte()/10);
+      }
+    }
+    else
+    {
+      // no more message
+      break;
+    }
+  }
+}
+
+
+// check if any node has a low battery state
+bool checkNodesBtyLow()
+{
+  for (uint8_t i = 0; i < NUM_NODES; i++)
+  {
+    Node &node = nodes[i];
+    if (STATE::hasFlag(node.state, STATE::NODE::BTYLOW))
+    {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+
 void setup() 
 {
   // setup PINS
@@ -141,14 +151,12 @@ void setup()
   radioInit = setupRadio();
 }
 
-
 void loop()
 {
-  static bool alarm = false;
-  static bool btyLow = false;
-  static bool charging = false;
+  static bool nodesBtyLow = false;
   static bool muted = false;
-  
+  static bool alarm = false;
+
   if (!radioInit)
   {
     flashFast();
@@ -159,12 +167,16 @@ void loop()
     recvRadioMessages();
     
     // check node states
-    alarm = checkAlarm(ALARM_TIMEOUT_MS);
-    btyLow = checkBtyLow();
-    charging = isBatteryCharging();
-    muted = !Timer<MUTE_TIMER>::hasExpired();
+    nodesBtyLow = checkNodesBtyLow();
+    muted = isMuted();
+    alarm = isSirenOn();
 
-    if (alarm && !muted)
+    // switch siren output on/off
+    if (alarm && muted)
+    {
+      analogWrite(MOS_ALARM_PIN, 248);
+    }
+    else if (alarm)
     {
       analogWrite(MOS_ALARM_PIN, 0);
     }
@@ -176,10 +188,10 @@ void loop()
     // send out siren node messages
     if (Timer<NODE_TIMER>::hasExpired())
     {
-      sendNodeMsg(false, btyLow, charging, muted);
-      Timer<NODE_TIMER>::start(MSG_TIMEOUT_MS + randomByte()*4);
+      sendNodeMsg(false, false, false, muted);
+      Timer<NODE_TIMER>::start(MSG_TIMEOUT - randomByte()*4ul);
 
-      ssprintf(Serial, "tx: vbatt=%.2f, bty_low=%s, charging=%s, muted=%s", getBatteryVoltage(), btyLow, charging, muted);
+      ssprintf(Serial, "tx: nodes_bty_low=%s, muted=%s\n", nodesBtyLow, muted);
     }
 
     // show app status
@@ -187,7 +199,7 @@ void loop()
     {
       flash();
     }
-    else if (btyLow || muted)
+    else if (nodesBtyLow || muted)
     {
       blinkAndFlash();
     }
@@ -197,5 +209,5 @@ void loop()
     }
   }
     
-  delay(randomByte()/50);
+  delay(10);
 }

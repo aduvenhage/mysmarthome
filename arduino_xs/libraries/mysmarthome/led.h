@@ -8,11 +8,11 @@ void switchLed(uint32_t period, uint8_t dutyCycle)
   {
     if ((255 * (t - t0) / period) > (uint8_t)dutyCycle)
     {
-      digitalWrite(LED_PIN, LOW);
+      digitalWrite(LED_PIN, !LED_ON);
     }
     else
     {
-      digitalWrite(LED_PIN, HIGH);
+      digitalWrite(LED_PIN, LED_ON);
     }
   }
   else

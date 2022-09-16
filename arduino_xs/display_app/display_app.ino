@@ -6,7 +6,7 @@ constexpr int RFM95_RST = 4;
 constexpr int RFM95_INT = 7;
 constexpr float RF95_FREQ = 868.0;
 constexpr int LED_PIN = 13;
-constexpr int LED_ON = LOW;
+constexpr int LED_ON = HIGH;
 constexpr float REF_V = 3.3;
 constexpr int BTY_PIN = A9;
 constexpr int CHG_PIN = A0;
@@ -22,10 +22,10 @@ constexpr int OLED_CLK = 10;
 constexpr int OLED_DC = 11;
 constexpr int OLED_CS = 12;
 constexpr int OLED_RESET = 6;
-constexpr unsigned long DSP_TIMEOUT_MS = 3000;
+constexpr unsigned long DSP_TIMEOUT = 3000;
 constexpr int BUTTON1_PIN = A1;
 constexpr int BUTTON2_PIN = A2;
-constexpr unsigned long MSG_TIMEOUT_MS = 4000;
+constexpr unsigned long MSG_TIMEOUT = 10000;
 constexpr int DSP_TIMER = 0;
 constexpr int NODE_TIMER = 1;
 constexpr int BT2_TIMER = 2;
@@ -138,7 +138,7 @@ uint8_t recvRadioMessages()
           if (STATE::hasFlag(node->state, STATE::NODE::OPEN) != STATE::hasFlag(msg.state, STATE::NODE::OPEN))
           {
             node->timestamp = millis();
-            Timer<DSP_TIMER>::start(DSP_TIMEOUT_MS);
+            Timer<DSP_TIMER>::start(DSP_TIMEOUT);
 
             if (STATE::hasFlag(msg.state, STATE::NODE::OPEN))
             {
@@ -171,7 +171,7 @@ void drawMain(unsigned long msgCount)
   // draw display/battery state
   display.setTextSize(1);
   display.setTextColor(WHITE);
-  ssprintf(display, "bty%s %d\n\n", isBatteryCharging() ? "*" : "", (int)getBatteryPercentage());
+  ssprintf(display, "bty%s %d\n\n\n", isBatteryCharging() ? "*" : "", (int)getBatteryPercentage());
 
   // draw current open sensor states 
   display.setTextSize(2);
@@ -186,7 +186,7 @@ void drawMain(unsigned long msgCount)
       const Node &node = nodes[dspIndex % NUM_NODES];
       if (STATE::hasFlag(node.state, STATE::NODE::OPEN))
       {
-        Timer<DSP_TIMER>::start(DSP_TIMEOUT_MS);        
+        Timer<DSP_TIMER>::start(DSP_TIMEOUT);        
         lastAlarm = &node;
         break;
       }
@@ -195,18 +195,18 @@ void drawMain(unsigned long msgCount)
 
   if (lastAlarm)
   {
-    ssprintf(display, "%s - %s\n\n", lastAlarm->name, (STATE::NODE)lastAlarm->state);
+    ssprintf(display, "%s\n", lastAlarm->name);
   }
   else
   {
-    ssprintf(display, "\n\n");
+    ssprintf(display, "\n");
   }
   
   // draw last received message string
   if (lastMsg)
   {
     display.setTextSize(1);
-    ssprintf(display, "%c %s - %s\n", getMsgCountSymbol(msgCount), lastMsg->name, (STATE::NODE)lastMsg->state);
+    ssprintf(display, "\n\n%c %s - %s\n", getMsgCountSymbol(msgCount), lastMsg->name, (STATE::NODE)lastMsg->state);
   }
 }
 
@@ -270,6 +270,7 @@ void loop()
   static bool btyLow = false;
   static bool charging = false;
   static bool muted = false;
+  static bool buttonsDown = false;
 
   if (!isRadioInitialized() || !oledInit)
   {
@@ -281,7 +282,7 @@ void loop()
     uint8_t msgCount = recvRadioMessages();
 
     // check sensor states
-    alarm = checkAlarm(DSP_TIMEOUT_MS);
+    alarm = checkAlarm(DSP_TIMEOUT);
     btyLow = checkBtyLow();
     charging = isBatteryCharging();
 
@@ -322,16 +323,23 @@ void loop()
     if (Timer<NODE_TIMER>::hasExpired())
     {
       sendNodeMsg(false, btyLow, charging, false);
-      Timer<NODE_TIMER>::start(MSG_TIMEOUT_MS + randomByte()*4);
+      Timer<NODE_TIMER>::start(MSG_TIMEOUT - randomByte()*4);
       
-      ssprintf(Serial, "tx: vbatt=%.2f, bty_low=%s, charging=%s\n", getBatteryVoltage(), btyLow, charging);
+      ssprintf(Serial, "tx: vbatt=%d, bty_low=%s, charging=%s\n", (int)(getBatteryVoltage()*100.0f + 0.5f), btyLow, charging);
     }
 
     // check for sleep
-    if (isButtonPressed(BUTTON2_PIN) || isButtonPressed(BUTTON1_PIN) || alarm)
+    if (alarm)
     {
       wakeUp();
     }
+    
+    if (!isButtonPressed(BUTTON2_PIN) && !isButtonPressed(BUTTON1_PIN) && buttonsDown)
+    {
+      wakeUp();
+    }
+
+    buttonsDown = isButtonPressed(BUTTON2_PIN) || isButtonPressed(BUTTON1_PIN);
 
     // status
     if (alarm)
@@ -342,11 +350,15 @@ void loop()
     {
       blinkAndFlash();
     }
-    else
+    else if (!charging)
     {
       blink();
     }
+    else
+    {
+      digitalWrite(LED_PIN, LED_ON);
+    }
   }
 
-  delay(randomByte()/50);
+  delay(10);
 }
