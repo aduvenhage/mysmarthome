@@ -137,13 +137,9 @@ uint8_t recvRadioMessages()
         {
           if (STATE::hasFlag(node->state, STATE::NODE::OPEN) != STATE::hasFlag(msg.state, STATE::NODE::OPEN))
           {
-            node->timestamp = millis();
             Timer<DSP_TIMER>::start(DSP_TIMEOUT);
-
-            if (STATE::hasFlag(msg.state, STATE::NODE::OPEN))
-            {
-              lastAlarm = node;
-            }
+            node->timestamp = millis();
+            lastAlarm = node;
           }
       
           node->state = msg.state;
@@ -177,20 +173,21 @@ void drawMain(unsigned long msgCount)
   display.setTextSize(2);
   display.setTextColor(WHITE);
 
-  if (!Timer<DSP_TIMER>::hasExpired())
+  if (Timer<DSP_TIMER>::hasExpired())
   {
     lastAlarm = nullptr;
     for (uint8_t i = 0; i < NUM_NODES; i++)
     {
       dspIndex++;
       const Node &node = nodes[dspIndex % NUM_NODES];
-      if (STATE::hasFlag(node.state, STATE::NODE::OPEN))
+      if (millis() - node.timestamp < MSG_TIMEOUT)
       {
-        Timer<DSP_TIMER>::start(DSP_TIMEOUT);        
         lastAlarm = &node;
         break;
       }
     }
+    
+    Timer<DSP_TIMER>::start(DSP_TIMEOUT);        
   }
 
   if (lastAlarm)

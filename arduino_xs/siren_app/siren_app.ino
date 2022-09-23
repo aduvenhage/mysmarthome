@@ -18,7 +18,7 @@ constexpr float CHG_VRR = 0.5;
 constexpr float BTY_MIN_V = 12;
 constexpr float BTY_LOW_V = 12.1;
 constexpr float BTY_MAX_V = 12.2;
-constexpr unsigned long MUTE_TIMEOUT = 1000ul*60ul*60ul;
+constexpr unsigned long MUTE_TIMEOUT = 1000ul*60ul*60ul;  // 1 hour
 constexpr unsigned long MSG_TIMEOUT = 4000;
 constexpr int MUTE_TIMER = 0;
 constexpr int NODE_TIMER = 1;
@@ -138,12 +138,14 @@ bool checkNodesBtyLow()
 void setup() 
 {
   // setup PINS
-  pinMode(LED_PIN, OUTPUT);
+  for (int i = 0; i < 4; i++) {
+    digitalWrite(MOS_PINS[i], 1);
+    pinMode(MOS_PINS[i], OUTPUT);
+    analogWrite(MOS_PINS[i], 255);
+  }
+
   digitalWrite(LED_PIN, HIGH);
-  analogWrite(MOS_PINS[0], 255);
-  analogWrite(MOS_PINS[1], 255);
-  analogWrite(MOS_PINS[2], 255);
-  analogWrite(MOS_PINS[3], 255);
+  pinMode(LED_PIN, OUTPUT);
 
   Serial.begin(9600);
 
