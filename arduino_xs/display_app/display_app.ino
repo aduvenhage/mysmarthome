@@ -22,15 +22,16 @@ constexpr int OLED_CLK = 10;
 constexpr int OLED_DC = 11;
 constexpr int OLED_CS = 12;
 constexpr int OLED_RESET = 6;
-constexpr unsigned long DSP_TIMEOUT = 3000;
 constexpr int BUTTON1_PIN = A1;
 constexpr int BUTTON2_PIN = A2;
-constexpr unsigned long MSG_TIMEOUT = 10000;
 constexpr int DSP_TIMER = 0;
 constexpr int NODE_TIMER = 1;
 constexpr int BT2_TIMER = 2;
 constexpr int SLEEP_TIMER = 3;
+constexpr unsigned long DSP_TIMEOUT = 3000;
+constexpr unsigned long MSG_TIMEOUT = 10000;
 constexpr unsigned long SLEEP_TIMEOUT = 30000;
+constexpr unsigned long ALARM_TIMEOUT = 16000;
 
 #include "config.h"
 #include <mysmarthome.h>
@@ -45,6 +46,7 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, OLED_MOSI, OLED_CLK, OLED_
 bool oledInit = false;
 Node *lastMsg = nullptr;
 Node *lastAlarm = nullptr;
+Node *lastDsp = nullptr;
 
 
 bool setupDisplay()
@@ -63,43 +65,6 @@ char getMsgCountSymbol(uint8_t msgCount)
 {
   static const char symbols[] = {'|', '/', '-', '\\'};
   return symbols[msgCount % sizeof(symbols)];
-}
-
-
-// check if alarm should be on
-bool checkAlarm(unsigned long timeout)
-{
-  unsigned long timestamp = millis();
-  for (uint8_t i = 0; i < NUM_NODES; i++)
-  {
-    Node &node = nodes[i];
-    if (STATE::hasFlag(node.state, STATE::NODE::OPEN))
-    {
-      if (timestamp - node.timestamp < timeout)
-      {
-        return true;
-      }
-    }
-  }
-
-  return false;
-}
-
-
-// check if any sensor has a low battery state
-bool checkBtyLow()
-{
-  unsigned long timestamp = millis();
-  for (uint8_t i = 0; i < NUM_NODES; i++)
-  {
-    Node &node = nodes[i];
-    if (STATE::hasFlag(node.state, STATE::NODE::BTYLOW))
-    {
-      return true;
-    }
-  }
-
-  return false;
 }
 
 
@@ -135,13 +100,18 @@ uint8_t recvRadioMessages()
         Node *node = getNode(msg.address);
         if (node)
         {
+          // check for new alarm event
           if (STATE::hasFlag(node->state, STATE::NODE::OPEN) != STATE::hasFlag(msg.state, STATE::NODE::OPEN))
           {
-            Timer<DSP_TIMER>::start(DSP_TIMEOUT);
+            // reset node timestamp only on new alarm
             node->timestamp = millis();
+
+            // set info for alarm display
             lastAlarm = node;
+            Timer<DSP_TIMER>::start(DSP_TIMEOUT);
           }
-      
+
+          // update rx node state
           node->state = msg.state;
           lastMsg = node;
         }
@@ -162,8 +132,6 @@ uint8_t recvRadioMessages()
 
 void drawMain(unsigned long msgCount)
 {
-  static uint8_t dspIndex = 0;
-
   // draw display/battery state
   display.setTextSize(1);
   display.setTextColor(WHITE);
@@ -173,26 +141,13 @@ void drawMain(unsigned long msgCount)
   display.setTextSize(2);
   display.setTextColor(WHITE);
 
-  if (Timer<DSP_TIMER>::hasExpired())
-  {
-    lastAlarm = nullptr;
-    for (uint8_t i = 0; i < NUM_NODES; i++)
-    {
-      dspIndex++;
-      const Node &node = nodes[dspIndex % NUM_NODES];
-      if (millis() - node.timestamp < MSG_TIMEOUT)
-      {
-        lastAlarm = &node;
-        break;
-      }
-    }
-    
-    Timer<DSP_TIMER>::start(DSP_TIMEOUT);        
-  }
-
   if (lastAlarm)
   {
     ssprintf(display, "%s\n", lastAlarm->name);
+  }
+  else if (lastDsp)
+  {
+    ssprintf(display, "%s\n", lastDsp->name);
   }
   else
   {
@@ -268,6 +223,7 @@ void loop()
   static bool charging = false;
   static bool muted = false;
   static bool buttonsDown = false;
+  static uint8_t dspIndex = 0;
 
   if (!isRadioInitialized() || !oledInit)
   {
@@ -279,9 +235,28 @@ void loop()
     uint8_t msgCount = recvRadioMessages();
 
     // check sensor states
-    alarm = checkAlarm(DSP_TIMEOUT);
-    btyLow = checkBtyLow();
+    alarm = lastDsp != nullptr;
     charging = isBatteryCharging();
+  
+    // reset alarm message and find next display message
+    if (Timer<DSP_TIMER>::hasExpired())
+    {
+      lastAlarm = nullptr;
+      lastDsp = nullptr;
+      for (uint8_t i = 0; i < NUM_NODES+1; i++)
+      {
+        dspIndex++;
+        const Node &node = nodes[dspIndex % NUM_NODES];
+        if (STATE::hasFlag(node.state, STATE::NODE::OPEN) || (millis() - node.timestamp < ALARM_TIMEOUT))
+        {
+          lastDsp = &node;
+          break;
+        }
+      }
+      
+      Timer<DSP_TIMER>::start(DSP_TIMEOUT);
+      ssprintf(Serial, "DSP restart %s\n", lastDsp != nullptr);      
+    }
 
     // prepare display display
     display.clearDisplay();

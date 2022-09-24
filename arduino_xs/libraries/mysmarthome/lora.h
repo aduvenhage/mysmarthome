@@ -24,7 +24,7 @@ bool setupRadio()
   digitalWrite(RFM95_RST, HIGH);
   delay(10);
 
-  int count = 0;
+  uint8_t count = 0;
   while (!radio.init())
   {
     if (count++ > 10)

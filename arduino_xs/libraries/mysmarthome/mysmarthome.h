@@ -62,7 +62,13 @@ struct Timer {
 
   static bool hasExpired()
   {
-    return (millis() - timestamp) >= timeout;
+    bool expired = (millis() - timestamp) >= timeout;
+    if (expired)
+    {
+        timeout = 0;
+    }
+    
+    return expired;
   }
   
   inline static unsigned long timeout = 0;

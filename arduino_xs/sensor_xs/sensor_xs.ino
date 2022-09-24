@@ -26,7 +26,7 @@ constexpr int NODE_TIMER = 0;
 
 bool isSensorOpen()
 {
-  return !digitalRead(INPUT_PIN);
+  return digitalRead(INPUT_PIN);
 }
 
 void setup() 
@@ -42,8 +42,53 @@ void setup()
   setupRadio();
 }
 
+void testXS()
+{
+  for (;;)
+  {
+    uint32_t t0 = millis();
+    while (millis() - t0 < 2000)
+    {
+      flashFast();
+    }
+    
+    for (int i = 0; i < 5; i++)
+    {
+      sendNodeMsg(true, false, false, false, 'HEKM');
+      flipLed();
+      delay(500);
+      sendNodeMsg(true, false, false, false, 'VOOR');
+      flipLed();
+      delay(4000);
+    }
+    
+    for (int i = 0; i < 5; i++)
+    {
+      sendNodeMsg(true, false, false, false, 'HEKM');
+      flipLed();
+      delay(500);
+      sendNodeMsg(false, false, false, false, 'VOOR');
+      flipLed();
+      delay(4000);
+    }
+
+    for (int i = 0; i < 5; i++)
+    {
+      sendNodeMsg(false, false, false, false, 'HEKM');
+      flipLed();
+      delay(500);
+      sendNodeMsg(false, false, false, false, 'VOOR');
+      flipLed();
+      delay(4000);
+    }
+  }
+}
+
 void loop()
 {
+  testXS();
+
+  
   static bool sensorOpen = false;
   static bool btyLow = false;
   static bool charging = false;
