@@ -8,7 +8,9 @@ constexpr float RF95_FREQ = 868.0;
 constexpr int LED_PIN = A3;
 constexpr int LED_ON = LOW;
 constexpr int MOS_PINS[4] = {5, 6, 9, 3};
-constexpr int MOS_ALARM_PIN = MOS_PINS[0];
+constexpr int MOS_ALARM_ALL_PIN = MOS_PINS[0];
+constexpr int MOS_ALARM_MUTED_PIN = MOS_PINS[1];
+constexpr int MOS_ALARM_NORMAL_PIN = MOS_PINS[2];
 constexpr uint32_t ALARM_TIMEOUT_MS = 10000;
 constexpr float REF_V = 3.3;
 constexpr int BTY_PIN = A1;
@@ -28,7 +30,6 @@ constexpr int SIREN_TIMER = 2;
 #include "config.h"
 #include <mysmarthome.h>
 
-#include <EEPROM.h>
 
 // returns true if siren should be on
 bool isSirenOn()
@@ -119,22 +120,6 @@ void recvRadioMessages()
 }
 
 
-// check if any node has a low battery state
-bool checkNodesBtyLow()
-{
-  for (uint8_t i = 0; i < NUM_NODES; i++)
-  {
-    Node &node = nodes[i];
-    if (STATE::hasFlag(node.state, STATE::NODE::BTYLOW))
-    {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-
 void setup() 
 {
   // setup PINS
@@ -155,7 +140,6 @@ void setup()
 
 void loop()
 {
-  static bool nodesBtyLow = false;
   static bool muted = false;
   static bool alarm = false;
 
@@ -169,22 +153,27 @@ void loop()
     recvRadioMessages();
     
     // check node states
-    nodesBtyLow = checkNodesBtyLow();
     muted = isMuted();
     alarm = isSirenOn();
 
-    // switch siren output on/off
+    // switch siren output on [0] / off [255]
     if (alarm && muted)
     {
-      analogWrite(MOS_ALARM_PIN, 248);
+      analogWrite(MOS_ALARM_ALL_PIN, 0);
+      analogWrite(MOS_ALARM_MUTED_PIN, 0);
+      analogWrite(MOS_ALARM_NORMAL_PIN, 255);
     }
     else if (alarm)
     {
-      analogWrite(MOS_ALARM_PIN, 0);
+      analogWrite(MOS_ALARM_ALL_PIN, 0);
+      analogWrite(MOS_ALARM_MUTED_PIN, 255);
+      analogWrite(MOS_ALARM_NORMAL_PIN, 0);
     }
     else
     {
-      analogWrite(MOS_ALARM_PIN, 255);
+      analogWrite(MOS_ALARM_ALL_PIN, 255);
+      analogWrite(MOS_ALARM_MUTED_PIN, 255);
+      analogWrite(MOS_ALARM_NORMAL_PIN, 255);
     }
 
     // send out siren node messages
@@ -193,7 +182,7 @@ void loop()
       sendNodeMsg(false, false, false, muted);
       Timer<NODE_TIMER>::start(MSG_TIMEOUT - randomByte()*4ul);
 
-      ssprintf(Serial, "tx: nodes_bty_low=%s, muted=%s\n", nodesBtyLow, muted);
+      ssprintf(Serial, "tx: muted=%s\n", muted);
     }
 
     // show app status
@@ -201,7 +190,7 @@ void loop()
     {
       flash();
     }
-    else if (nodesBtyLow || muted)
+    else if (muted)
     {
       blinkAndFlash();
     }
@@ -210,6 +199,4 @@ void loop()
       blink();
     }
   }
-    
-  delay(10);
 }

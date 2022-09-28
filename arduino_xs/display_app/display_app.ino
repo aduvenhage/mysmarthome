@@ -24,12 +24,12 @@ constexpr int OLED_CS = 12;
 constexpr int OLED_RESET = 6;
 constexpr int BUTTON1_PIN = A1;
 constexpr int BUTTON2_PIN = A2;
-constexpr int DSP_TIMER = 0;
+constexpr int CYCLE_TIMER = 0;
 constexpr int NODE_TIMER = 1;
 constexpr int BT2_TIMER = 2;
 constexpr int SLEEP_TIMER = 3;
-constexpr unsigned long DSP_TIMEOUT = 3000;
-constexpr unsigned long MSG_TIMEOUT = 10000;
+constexpr unsigned long CYCLE_TIMEOUT = 3000;
+constexpr unsigned long NODE_TIMEOUT = 4000;
 constexpr unsigned long SLEEP_TIMEOUT = 30000;
 constexpr unsigned long ALARM_TIMEOUT = 16000;
 
@@ -45,19 +45,16 @@ constexpr unsigned long ALARM_TIMEOUT = 16000;
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
 bool oledInit = false;
 Node *lastMsg = nullptr;
-Node *lastAlarm = nullptr;
-Node *lastDsp = nullptr;
+Node *lastOpen = nullptr;
+Node *lastBtyLow = nullptr;
+Node *lastMuted = nullptr;
+Node *dspNode = nullptr;
 
 
 bool setupDisplay()
 {
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  if(!display.begin(SSD1306_SWITCHCAPVCC))
-  {
-    return false;
-  }
-
-  return true;
+  return display.begin(SSD1306_SWITCHCAPVCC);
 }
 
 
@@ -100,17 +97,19 @@ uint8_t recvRadioMessages()
         Node *node = getNode(msg.address);
         if (node)
         {
-          // check for new alarm event
+          // check for events
+          if (STATE::hasFlag(msg.state, STATE::NODE::OPEN)) lastOpen = node;
+          if (STATE::hasFlag(msg.state, STATE::NODE::BTYLOW)) lastBtyLow = node;
+          if (STATE::hasFlag(msg.state, STATE::NODE::MUTED)) lastMuted = node;
+
+          // reset node timestamp only on new alarm
           if (STATE::hasFlag(node->state, STATE::NODE::OPEN) != STATE::hasFlag(msg.state, STATE::NODE::OPEN))
           {
-            // reset node timestamp only on new alarm
+            dspNode = nullptr;
             node->timestamp = millis();
-
-            // set info for alarm display
-            lastAlarm = node;
-            Timer<DSP_TIMER>::start(DSP_TIMEOUT);
+            Timer<CYCLE_TIMER>::start(CYCLE_TIMEOUT);
           }
-
+          
           // update rx node state
           node->state = msg.state;
           lastMsg = node;
@@ -130,24 +129,47 @@ uint8_t recvRadioMessages()
 }
 
 
+bool isNodeMuted()
+{
+  return lastMuted ? STATE::hasFlag(lastMuted->state, STATE::NODE::MUTED) : false;
+}
+
+
+bool isNodeBtyLow()
+{
+  return lastBtyLow ? STATE::hasFlag(lastBtyLow->state, STATE::NODE::BTYLOW) : false;
+}
+
+
+bool isNodeOpen()
+{
+  return lastOpen ? STATE::hasFlag(lastOpen->state, STATE::NODE::OPEN) || (millis() - lastOpen->timestamp < ALARM_TIMEOUT) : false;
+}
+
+
 void drawMain(unsigned long msgCount)
 {
   // draw display/battery state
   display.setTextSize(1);
-  display.setTextColor(WHITE);
-  ssprintf(display, "bty%s %d\n\n\n", isBatteryCharging() ? "*" : "", (int)getBatteryPercentage());
+  display.setTextColor(BLACK, WHITE);
+  ssprintf(display,
+           " %c %s \t  bty%s %3d \n\n\n",
+           getMsgCountSymbol(msgCount),
+           isNodeMuted() ? "muted" : "     ",
+           isBatteryCharging() ? "*" : "",
+           (int)getBatteryPercentage());
 
   // draw current open sensor states 
   display.setTextSize(2);
   display.setTextColor(WHITE);
 
-  if (lastAlarm)
+  if (dspNode)
   {
-    ssprintf(display, "%s\n", lastAlarm->name);
+    ssprintf(display, "%s\n", dspNode->name);
   }
-  else if (lastDsp)
+  else if (isNodeOpen())
   {
-    ssprintf(display, "%s\n", lastDsp->name);
+    ssprintf(display, "%s\n", lastOpen->name);
   }
   else
   {
@@ -158,8 +180,17 @@ void drawMain(unsigned long msgCount)
   if (lastMsg)
   {
     display.setTextSize(1);
-    ssprintf(display, "\n\n%c %s - %s\n", getMsgCountSymbol(msgCount), lastMsg->name, (STATE::NODE)lastMsg->state);
+    ssprintf(display, "\n %s - %s\n", lastMsg->name, (STATE::NODE)lastMsg->state);
   }
+  else
+  {
+    ssprintf(display, "\n\n");
+  }
+
+  // draw static button labels
+  display.setTextSize(1);
+  display.setTextColor(BLACK, WHITE);
+  ssprintf(display, "   mute   \t   list   ");
 }
 
 
@@ -218,9 +249,6 @@ void setup()
 
 void loop()
 {
-  static bool alarm = false;
-  static bool btyLow = false;
-  static bool charging = false;
   static bool muted = false;
   static bool buttonsDown = false;
   static uint8_t dspIndex = 0;
@@ -234,31 +262,26 @@ void loop()
     // receive messages
     uint8_t msgCount = recvRadioMessages();
 
-    // check sensor states
-    alarm = lastDsp != nullptr;
-    charging = isBatteryCharging();
-  
     // reset alarm message and find next display message
-    if (Timer<DSP_TIMER>::hasExpired())
+    if (Timer<CYCLE_TIMER>::hasExpired())
     {
-      lastAlarm = nullptr;
-      lastDsp = nullptr;
+      dspNode = nullptr;
       for (uint8_t i = 0; i < NUM_NODES+1; i++)
       {
         dspIndex++;
         const Node &node = nodes[dspIndex % NUM_NODES];
         if (STATE::hasFlag(node.state, STATE::NODE::OPEN) || (millis() - node.timestamp < ALARM_TIMEOUT))
         {
-          lastDsp = &node;
+          dspNode = &node;
           break;
         }
       }
       
-      Timer<DSP_TIMER>::start(DSP_TIMEOUT);
-      ssprintf(Serial, "DSP restart %s\n", lastDsp != nullptr);      
+      Timer<CYCLE_TIMER>::start(CYCLE_TIMEOUT);
+      ssprintf(Serial, "DSP restart %s\n", dspNode != nullptr);      
     }
 
-    // prepare display display
+    // prepare display
     display.clearDisplay();
     display.cp437(true);
     display.setCursor(0, 0);
@@ -279,7 +302,7 @@ void loop()
     display.dim(true);
     display.display();
 
-    // send out display node messages
+    // send out mute command
     if (!isSleeping() && isButtonPressed(BUTTON2_PIN))
     {
       if (Timer<BT2_TIMER>::hasExpired())
@@ -291,22 +314,24 @@ void loop()
         ssprintf(Serial, "tx: muted=%s", muted);
       }
     }
-    
+
+    // get node state
+    bool charging = isBatteryCharging();
+    bool btyLow = isBatteryLow();
+    bool alarm = isNodeOpen();
+    bool nodesBtyLow = isNodeBtyLow();
+
+    // send out node state
     if (Timer<NODE_TIMER>::hasExpired())
     {
-      sendNodeMsg(false, btyLow, charging, false);
-      Timer<NODE_TIMER>::start(MSG_TIMEOUT - randomByte()*4);
+      sendNodeMsg(false, isBatteryLow, charging, false);
+      Timer<NODE_TIMER>::start(NODE_TIMEOUT - randomByte()*4);
       
       ssprintf(Serial, "tx: vbatt=%d, bty_low=%s, charging=%s\n", (int)(getBatteryVoltage()*100.0f + 0.5f), btyLow, charging);
     }
 
-    // check for sleep
-    if (alarm)
-    {
-      wakeUp();
-    }
-    
-    if (!isButtonPressed(BUTTON2_PIN) && !isButtonPressed(BUTTON1_PIN) && buttonsDown)
+    // wake up display on alarm or button press
+    if ((alarm) || (!isButtonPressed(BUTTON2_PIN) && !isButtonPressed(BUTTON1_PIN) && buttonsDown))
     {
       wakeUp();
     }
@@ -318,7 +343,7 @@ void loop()
     {
       flash();
     }
-    else if (btyLow)
+    else if (btyLow || nodesBtyLow)
     {
       blinkAndFlash();
     }
@@ -331,6 +356,4 @@ void loop()
       digitalWrite(LED_PIN, LED_ON);
     }
   }
-
-  delay(10);
 }

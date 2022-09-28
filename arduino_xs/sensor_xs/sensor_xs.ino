@@ -129,6 +129,4 @@ void loop()
       blink();
     }
   }
-  
-  delay(10);
 }
