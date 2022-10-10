@@ -15,7 +15,7 @@ https://learn.adafruit.com/adafruit-feather-32u4-radio-with-lora-radio-module/se
 ### Extra libs (install via arduino IDE)
 crc: https://github.com/RobTillaart/CRC
 radio: https://learn.adafruit.com/adafruit-feather-32u4-radio-with-lora-radio-module/using-the-rfm-9x-radio
-ssd: Adafruit SSD1306
+oled: U8G2 (https://github.com/olikraus/u8g2/wiki/u8g2reference)
 
 ### Install arduino feather/lora board
 Based on Adafruit Feather 32u4 + LoRa 868mhz

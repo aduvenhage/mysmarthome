@@ -5,11 +5,12 @@ constexpr int RFM95_CS = 8;
 constexpr int RFM95_RST = 4;
 constexpr int RFM95_INT = 7;
 constexpr float RF95_FREQ = 868.0;
+constexpr int GND_PINS[] = {A0, A1, A3};
 constexpr int LED_PIN = 13;
 constexpr int LED_ON = HIGH;
 constexpr float REF_V = 3.3;
 constexpr int BTY_PIN = A9;
-constexpr int CHG_PIN = A0;
+constexpr int CHG_PIN = A2;
 constexpr float BTY_VRR = 0.5;
 constexpr float CHG_VRR = 0.5;
 constexpr float BTY_MIN_V = 3.5;
@@ -22,8 +23,8 @@ constexpr int OLED_CLK = 10;
 constexpr int OLED_DC = 11;
 constexpr int OLED_CS = 12;
 constexpr int OLED_RESET = 6;
-constexpr int BUTTON1_PIN = A1;
-constexpr int BUTTON2_PIN = A2;
+constexpr int BUTTON1_PIN = A4;
+constexpr int BUTTON2_PIN = A5;
 constexpr int CYCLE_TIMER = 0;
 constexpr int NODE_TIMER = 1;
 constexpr int BT2_TIMER = 2;
@@ -33,35 +34,25 @@ constexpr unsigned long NODE_TIMEOUT = 4000;
 constexpr unsigned long SLEEP_TIMEOUT = 30000;
 constexpr unsigned long ALARM_TIMEOUT = 16000;
 
+
 #include "config.h"
 #include <mysmarthome.h>
 
-#include <SPI.h>
-#include <Wire.h>
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 
-
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, OLED_MOSI, OLED_CLK, OLED_DC, OLED_RESET, OLED_CS);
-bool oledInit = false;
 Node *lastMsg = nullptr;
 Node *lastOpen = nullptr;
 Node *lastBtyLow = nullptr;
 Node *lastMuted = nullptr;
 Node *dspNode = nullptr;
 
-
-bool setupDisplay()
-{
-  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-  return display.begin(SSD1306_SWITCHCAPVCC);
-}
+U8G2_SSD1306_128X64_NONAME_F_4W_SW_SPI u8g2sw(U8G2_R0, OLED_CLK, OLED_MOSI, OLED_CS, OLED_DC, OLED_RESET);
+U8G2Display display(u8g2sw);
 
 
-char getMsgCountSymbol(uint8_t msgCount)
+char getMsgCountSymbol(uint8_t _msgCount)
 {
   static const char symbols[] = {'|', '/', '-', '\\'};
-  return symbols[msgCount % sizeof(symbols)];
+  return symbols[_msgCount % sizeof(symbols)];
 }
 
 
@@ -150,60 +141,55 @@ bool isNodeOpen()
 void drawMain(unsigned long msgCount)
 {
   // draw display/battery state
-  display.setTextSize(1);
-  display.setTextColor(BLACK, WHITE);
+  display.set1X();
+  display.setInvertMode(true);
+  
   ssprintf(display,
-           " %c %s \t  bty%s %3d \n\n\n",
+           " %c %s :  bty%s %3d   \n\n\n",
            getMsgCountSymbol(msgCount),
            isNodeMuted() ? "muted" : "     ",
            isBatteryCharging() ? "*" : "",
            (int)getBatteryPercentage());
 
   // draw current open sensor states 
-  display.setTextSize(2);
-  display.setTextColor(WHITE);
-
+  display.set2X();
+  display.setInvertMode(false);
   if (dspNode)
   {
-    ssprintf(display, "%s\n", dspNode->name);
+    ssprintf(display, "%s", dspNode->name);
   }
   else if (isNodeOpen())
   {
-    ssprintf(display, "%s\n", lastOpen->name);
-  }
-  else
-  {
-    ssprintf(display, "\n");
+    ssprintf(display, "%s", lastOpen->name);
   }
   
   // draw last received message string
+  display.set1X();
   if (lastMsg)
   {
-    display.setTextSize(1);
-    ssprintf(display, "\n %s - %s\n", lastMsg->name, (STATE::NODE)lastMsg->state);
+    ssprintf(display, "\n\n\n %s - %s\n", lastMsg->name, (STATE::NODE)lastMsg->state);
   }
   else
   {
-    ssprintf(display, "\n\n");
+    ssprintf(display, "\n\n\n\n");
   }
 
   // draw static button labels
-  display.setTextSize(1);
-  display.setTextColor(BLACK, WHITE);
-  ssprintf(display, "   mute   \t   list   ");
+  display.set1X();
+  display.setInvertMode(true);
+  ssprintf(display, "   mute   :   list   ");
 }
 
 
 void drawList()
 {
-  display.setTextSize(0);
-  display.setTextColor(BLACK, WHITE);
-  display.fillScreen(WHITE);
+  display.set1X();
+  display.setInvertMode(true);
   
   for (uint8_t i = 0; i < NUM_NODES; i++)
   {
     Node &node = nodes[i];
-    ssprintf(display, "%s - %s\n", node.name, (STATE::NODE)node.state);
+    ssprintf(display, "%s - %s           \n", node.name, (STATE::NODE)node.state);
   }
 }
 
@@ -232,20 +218,24 @@ void setup()
   pinMode(LED_PIN, OUTPUT);
   pinMode(BUTTON1_PIN, INPUT_PULLUP);
   pinMode(BUTTON2_PIN, INPUT_PULLUP);
+
+  // setup additional GND lines
+  for (int pin : GND_PINS)
+  {
+    pinMode(pin, OUTPUT);
+    digitalWrite(pin, LOW);
+  }
   
   // setup serial
   Serial.begin(9600);
   
   // setup display
-  oledInit = setupDisplay();
-  display.clearDisplay();
-  display.display();
+  display.begin();
   
   // setup and test LoRa
   setupRadio();
   wakeUp();
 }
-
 
 void loop()
 {
@@ -253,107 +243,95 @@ void loop()
   static bool buttonsDown = false;
   static uint8_t dspIndex = 0;
 
-  if (!isRadioInitialized() || !oledInit)
+  // receive messages
+  uint8_t msgCount = recvRadioMessages();
+
+  // reset alarm message and find next display message
+  if (Timer<CYCLE_TIMER>::hasExpired())
   {
-    flashFast();
+    dspNode = nullptr;
+    for (uint8_t i = 0; i < NUM_NODES+1; i++)
+    {
+      dspIndex++;
+      const Node &node = nodes[dspIndex % NUM_NODES];
+      if (STATE::hasFlag(node.state, STATE::NODE::OPEN) || (millis() - node.timestamp < ALARM_TIMEOUT))
+      {
+        dspNode = &node;
+        break;
+      }
+    }
+    
+    Timer<CYCLE_TIMER>::start(CYCLE_TIMEOUT);
+    ssprintf(Serial, "DSP restart %s\n", dspNode != nullptr);      
+  }
+
+  // prepare display
+  display.clear();
+  if (isSleeping())
+  {
+  }
+  else if (isButtonPressed(BUTTON1_PIN))
+  {
+    drawList();
   }
   else
   {
-    // receive messages
-    uint8_t msgCount = recvRadioMessages();
+    drawMain(msgCount);
+  }
 
-    // reset alarm message and find next display message
-    if (Timer<CYCLE_TIMER>::hasExpired())
-    {
-      dspNode = nullptr;
-      for (uint8_t i = 0; i < NUM_NODES+1; i++)
-      {
-        dspIndex++;
-        const Node &node = nodes[dspIndex % NUM_NODES];
-        if (STATE::hasFlag(node.state, STATE::NODE::OPEN) || (millis() - node.timestamp < ALARM_TIMEOUT))
-        {
-          dspNode = &node;
-          break;
-        }
-      }
-      
-      Timer<CYCLE_TIMER>::start(CYCLE_TIMEOUT);
-      ssprintf(Serial, "DSP restart %s\n", dspNode != nullptr);      
-    }
+  display.display();
 
-    // prepare display
-    display.clearDisplay();
-    display.cp437(true);
-    display.setCursor(0, 0);
+  // send out mute command
+  if (!isSleeping() && isButtonPressed(BUTTON2_PIN))
+  {
+    if (Timer<BT2_TIMER>::hasExpired())
+    {
+      muted = !muted;
+      sendCmdMsg(muted);
+      Timer<BT2_TIMER>::start(1000);
 
-    if (isSleeping())
-    {
-      
+      ssprintf(Serial, "tx: muted=%s\n", muted);
     }
-    else if (isButtonPressed(BUTTON1_PIN))
-    {
-      drawList();
-    }
-    else
-    {
-      drawMain(msgCount);
-    }
+  }
 
-    display.dim(true);
-    display.display();
+  // get node state
+  bool charging = isBatteryCharging();
+  bool btyLow = isBatteryLow();
+  bool alarm = isNodeOpen();
+  bool nodesBtyLow = isNodeBtyLow();
 
-    // send out mute command
-    if (!isSleeping() && isButtonPressed(BUTTON2_PIN))
-    {
-      if (Timer<BT2_TIMER>::hasExpired())
-      {
-        muted = !muted;
-        sendCmdMsg(muted);
-        Timer<BT2_TIMER>::start(1000);
+  // send out node state
+  if (Timer<NODE_TIMER>::hasExpired())
+  {
+    sendNodeMsg(false, isBatteryLow, charging, false);
+    Timer<NODE_TIMER>::start(NODE_TIMEOUT - randomByte()*4);
+    
+    ssprintf(Serial, "tx: vbatt=%d, bty_low=%s, charging=%s\n", (int)(getBatteryVoltage()*100.0f + 0.5f), btyLow, charging);
+  }
 
-        ssprintf(Serial, "tx: muted=%s", muted);
-      }
-    }
+  // wake up display on alarm or button press
+  if ((alarm) || (!isButtonPressed(BUTTON2_PIN) && !isButtonPressed(BUTTON1_PIN) && buttonsDown))
+  {
+    wakeUp();
+  }
 
-    // get node state
-    bool charging = isBatteryCharging();
-    bool btyLow = isBatteryLow();
-    bool alarm = isNodeOpen();
-    bool nodesBtyLow = isNodeBtyLow();
+  buttonsDown = isButtonPressed(BUTTON2_PIN) || isButtonPressed(BUTTON1_PIN);
 
-    // send out node state
-    if (Timer<NODE_TIMER>::hasExpired())
-    {
-      sendNodeMsg(false, isBatteryLow, charging, false);
-      Timer<NODE_TIMER>::start(NODE_TIMEOUT - randomByte()*4);
-      
-      ssprintf(Serial, "tx: vbatt=%d, bty_low=%s, charging=%s\n", (int)(getBatteryVoltage()*100.0f + 0.5f), btyLow, charging);
-    }
-
-    // wake up display on alarm or button press
-    if ((alarm) || (!isButtonPressed(BUTTON2_PIN) && !isButtonPressed(BUTTON1_PIN) && buttonsDown))
-    {
-      wakeUp();
-    }
-
-    buttonsDown = isButtonPressed(BUTTON2_PIN) || isButtonPressed(BUTTON1_PIN);
-
-    // status
-    if (alarm)
-    {
-      flash();
-    }
-    else if (btyLow || nodesBtyLow)
-    {
-      blinkAndFlash();
-    }
-    else if (!charging)
-    {
-      blink();
-    }
-    else
-    {
-      digitalWrite(LED_PIN, LED_ON);
-    }
+  // status
+  if (alarm)
+  {
+    flash();
+  }
+  else if (btyLow || nodesBtyLow)
+  {
+    blinkAndFlash();
+  }
+  else if (!charging)
+  {
+    blink();
+  }
+  else
+  {
+    digitalWrite(LED_PIN, LED_ON);
   }
 }

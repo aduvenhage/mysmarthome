@@ -11,7 +11,6 @@ Node nodes[] = {
   {"HEKMOTOR", 'HEKM', 0, 0},
   {"AFDAK BEAM", 'AFDK', 0, 0},
   {"VOOR BEAM", 'VOOR', 0, 0},
-  {"SIREN", 'SIRN', 0, 0},
   {"DISPLAY", 'DISP', 0, 0},
 };
 

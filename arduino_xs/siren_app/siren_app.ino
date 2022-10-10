@@ -39,9 +39,9 @@ bool isSirenOn()
 
 
 // start siren timer
-void startSiren(unsigned long timeout)
+void startSiren(unsigned long _timeout)
 {
-  Timer<SIREN_TIMER>::start(timeout);
+  Timer<SIREN_TIMER>::start(_timeout);
 }
 
 
@@ -53,9 +53,9 @@ bool isMuted()
 
 
 // start mute timer
-void startMute(unsigned long timeout)
+void startMute(unsigned long _timeout)
 {
-  Timer<MUTE_TIMER>::start(timeout);
+  Timer<MUTE_TIMER>::start(_timeout);
 }
 
 

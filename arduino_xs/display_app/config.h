@@ -12,7 +12,6 @@ Node nodes[] = {
   {"AFDAK BEAM", 'AFDK', 0, 0},
   {"VOOR BEAM", 'VOOR', 0, 0},
   {"SIREN", 'SIRN', 0, 0},
-  {"DISPLAY", 'DISP', 0, 0},
 };
 
 constexpr uint8_t NUM_NODES = sizeof(nodes) / sizeof(Node); 
