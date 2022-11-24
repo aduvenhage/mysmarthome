@@ -23,7 +23,7 @@ struct Format<String>
 namespace {
   const char *ssprintfBuffer()
   {
-    static char buffer[64];
+    static char buffer[32];
     return buffer;
   }
 };

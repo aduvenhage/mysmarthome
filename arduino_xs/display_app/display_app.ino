@@ -37,6 +37,7 @@ constexpr unsigned long ALARM_TIMEOUT = 16000;
 
 #include "config.h"
 #include <mysmarthome.h>
+#include <U8g2lib.h>
 
 
 Node *lastMsg = nullptr;
@@ -45,9 +46,56 @@ Node *lastBtyLow = nullptr;
 Node *lastMuted = nullptr;
 Node *dspNode = nullptr;
 
-U8G2_SSD1306_128X64_NONAME_F_4W_SW_SPI u8g2sw(U8G2_R0, OLED_CLK, OLED_MOSI, OLED_CS, OLED_DC, OLED_RESET);
-U8G2Display display(u8g2sw);
+U8G2_SSD1306_128X64_NONAME_2_4W_SW_SPI display(U8G2_R0, OLED_CLK, OLED_MOSI, OLED_CS, OLED_DC, OLED_RESET);
 
+
+// print into display (support \n line breaks)
+struct Printer
+{
+  int ypos = 0;
+  void print(const char *str)
+  {
+    const char *p = str;
+    while (*p)
+    {
+      if (*p == '\n' || ypos == 0)
+      {
+        ypos += display.getMaxCharHeight();
+        display.setCursor(0, ypos);
+      }
+      
+      display.print(*p);
+      ++p;
+    }
+  }
+
+  void reset() {ypos = 0;}
+};    
+
+Printer printer;
+
+
+void setFont1X()
+{
+  // see https://github.com/olikraus/u8g2/wiki/fntgrpx11 for info on fonts, memory usage, etc
+  display.setFont(u8g2_font_6x10_mr);
+}
+
+void setFont2X()
+{
+  // see https://github.com/olikraus/u8g2/wiki/fntgrpx11 for info on fonts, memory usage, etc
+  display.setFont(u8g2_font_10x20_mr);
+}
+
+void setColorNormal()
+{
+  display.setDrawColor(1);
+}
+
+void setColorInverted()
+{
+  display.setDrawColor(0);
+}
 
 char getMsgCountSymbol(uint8_t _msgCount)
 {
@@ -141,55 +189,57 @@ bool isNodeOpen()
 void drawMain(unsigned long msgCount)
 {
   // draw display/battery state
-  display.set1X();
-  display.setInvertMode(true);
+  printer.reset();
+  setFont1X();
+  setColorInverted();
   
-  ssprintf(display,
-           " %c %s :  bty%s %3d   \n\n\n",
+  ssprintf(printer,
+           " %c %s :  bty%s %3d   \n\n",
            getMsgCountSymbol(msgCount),
            isNodeMuted() ? "muted" : "     ",
            isBatteryCharging() ? "*" : "",
            (int)getBatteryPercentage());
 
-  // draw current open sensor states 
-  display.set2X();
-  display.setInvertMode(false);
+  // draw current open sensor states
+  setFont2X();
+  setColorNormal();
   if (dspNode)
   {
-    ssprintf(display, "%s", dspNode->name);
+    ssprintf(printer, "  %s", dspNode->name);
   }
   else if (isNodeOpen())
   {
-    ssprintf(display, "%s", lastOpen->name);
+    ssprintf(printer, "  %s", lastOpen->name);
   }
   
   // draw last received message string
-  display.set1X();
+  setFont1X();
   if (lastMsg)
   {
-    ssprintf(display, "\n\n\n %s - %s\n", lastMsg->name, (STATE::NODE)lastMsg->state);
+    ssprintf(printer, "\n\n %s - %s\n", lastMsg->name, (STATE::NODE)lastMsg->state);
   }
   else
   {
-    ssprintf(display, "\n\n\n\n");
+    ssprintf(printer, "\n\n\n");
   }
 
   // draw static button labels
-  display.set1X();
-  display.setInvertMode(true);
-  ssprintf(display, "   mute   :   list   ");
+  setFont1X();
+  setColorInverted();
+  ssprintf(printer, "   mute   :   list   ");
 }
 
 
 void drawList()
 {
-  display.set1X();
-  display.setInvertMode(true);
+  printer.reset();
+  setFont1X();
+  setColorInverted();
   
   for (uint8_t i = 0; i < NUM_NODES; i++)
   {
     Node &node = nodes[i];
-    ssprintf(display, "%s - %s           \n", node.name, (STATE::NODE)node.state);
+    ssprintf(printer, "%s - %s           \n", node.name, (STATE::NODE)node.state);
   }
 }
 
@@ -202,12 +252,17 @@ bool isButtonPressed(int pin)
 
 bool isSleeping()
 {
-  return Timer<SLEEP_TIMER>::hasExpired();
+  bool sleeping = Timer<SLEEP_TIMER>::hasExpired();
+  if (sleeping)
+  {
+    display.setPowerSave(1);
+  }
 }
 
 
 void wakeUp()
 {
+  display.setPowerSave(0);
   Timer<SLEEP_TIMER>::start(SLEEP_TIMEOUT);
 }
 
@@ -236,6 +291,7 @@ void setup()
   setupRadio();
   wakeUp();
 }
+
 
 void loop()
 {
@@ -266,20 +322,25 @@ void loop()
   }
 
   // prepare display
-  display.clear();
   if (isSleeping())
   {
   }
   else if (isButtonPressed(BUTTON1_PIN))
   {
-    drawList();
+    display.firstPage();
+    do {
+      drawList();
+    }
+    while (display.nextPage());
   }
   else
   {
-    drawMain(msgCount);
+    display.firstPage();
+    do {
+      drawMain(msgCount);
+    }
+    while (display.nextPage());
   }
-
-  display.display();
 
   // send out mute command
   if (!isSleeping() && isButtonPressed(BUTTON2_PIN))

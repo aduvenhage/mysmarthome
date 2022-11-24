@@ -2,7 +2,6 @@
 #include "battery.h"
 #include "lora.h"
 #include "led.h"
-#include "oled_u8g2.h"
 #include "random.h"
 #include "ssprintf.h"
 
